@@ -3,7 +3,7 @@
  *
  * Author: Timur Tabi <timur@freescale.com>
  *
- * Copyright 2007-2008 Freescale Semiconductor, Inc.  This file is licensed
+ * Copyright 2007-2013 Freescale Semiconductor, Inc.  This file is licensed
  * under the terms of the GNU General Public License version 2.  This
  * program is licensed "as is" without any warranty of any kind, whether
  * express or implied.
@@ -36,6 +36,33 @@
 #define CCSR_SSI_SACCST			0x50
 #define CCSR_SSI_SACCEN			0x54
 #define CCSR_SSI_SACCDIS		0x58
+
+/* SSI Register Map */
+struct ccsr_ssi {
+	__be32 stx0;	/* 0x.0000 - SSI Transmit Data Register 0 */
+	__be32 stx1;	/* 0x.0004 - SSI Transmit Data Register 1 */
+	__be32 srx0;	/* 0x.0008 - SSI Receive Data Register 0 */
+	__be32 srx1;	/* 0x.000C - SSI Receive Data Register 1 */
+	__be32 scr;	/* 0x.0010 - SSI Control Register */
+	__be32 sisr;	/* 0x.0014 - SSI Interrupt Status Register Mixed */
+	__be32 sier;	/* 0x.0018 - SSI Interrupt Enable Register */
+	__be32 stcr;	/* 0x.001C - SSI Transmit Configuration Register */
+	__be32 srcr;	/* 0x.0020 - SSI Receive Configuration Register */
+	__be32 stccr;	/* 0x.0024 - SSI Transmit Clock Control Register */
+	__be32 srccr;	/* 0x.0028 - SSI Receive Clock Control Register */
+	__be32 sfcsr;	/* 0x.002C - SSI FIFO Control/Status Register */
+	__be32 str;	/* 0x.0030 - SSI Test Register */
+	__be32 sor;	/* 0x.0034 - SSI Option Register */
+	__be32 sacnt;	/* 0x.0038 - SSI AC97 Control Register */
+	__be32 sacadd;	/* 0x.003C - SSI AC97 Command Address Register */
+	__be32 sacdat;	/* 0x.0040 - SSI AC97 Command Data Register */
+	__be32 satag;	/* 0x.0044 - SSI AC97 Tag Register */
+	__be32 stmsk;	/* 0x.0048 - SSI Transmit Time Slot Mask Register */
+	__be32 srmsk;	/* 0x.004C - SSI Receive Time Slot Mask Register */
+	__be32 saccst;	/* 0x.0050 - SSI AC97 Channel Status Register */
+	__be32 saccen;	/* 0x.0054 - SSI AC97 Channel Enable Register */
+	__be32 saccdis; /* 0x.0058 - SSI AC97 Channel Disable Register */
+};
 
 #define CCSR_SSI_SCR_SYNC_TX_FS		0x00001000
 #define CCSR_SSI_SCR_RFR_CLK_DIS	0x00000800
@@ -125,8 +152,10 @@
 
 /* STCCR and SRCCR */
 #define CCSR_SSI_SxCCR_DIV2_SHIFT	18
+#define CCSR_SSI_SxCCR_DIV2_MASK	0x00040000
 #define CCSR_SSI_SxCCR_DIV2		0x00040000
 #define CCSR_SSI_SxCCR_PSR_SHIFT	17
+#define CCSR_SSI_SxCCR_PSR_MASK		0x00020000
 #define CCSR_SSI_SxCCR_PSR		0x00020000
 #define CCSR_SSI_SxCCR_WL_SHIFT		13
 #define CCSR_SSI_SxCCR_WL_MASK		0x0001E000
@@ -204,8 +233,6 @@
 #define CCSR_SSI_SACNT_TIF		0x00000004
 #define CCSR_SSI_SACNT_FV		0x00000002
 #define CCSR_SSI_SACNT_AC97EN		0x00000001
-
-
 struct device;
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)
@@ -266,3 +293,4 @@ static inline void fsl_ssi_debugfs_remove(struct fsl_ssi_dbg *ssi_dbg)
 #endif  /* ! IS_ENABLED(CONFIG_DEBUG_FS) */
 
 #endif
+
