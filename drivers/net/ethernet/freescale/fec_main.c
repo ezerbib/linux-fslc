@@ -195,7 +195,7 @@ MODULE_PARM_DESC(macaddr, "FEC Ethernet MAC address");
 #define FEC_ECR_MAGICEN		(1 << 2)
 #define FEC_ECR_SLEEP		(1 << 3)
 
-#define FEC_MII_TIMEOUT		30000 /* us */
+#define FEC_MII_TIMEOUT		300000 /* us */ /* EZ incremented by factor x10 */
 
 /* Transmitter timeout */
 #define TX_TIMEOUT (2 * HZ)

@@ -303,7 +303,7 @@ static void det_work_enable(struct tc_data *td, int enable)
 ///* 720x480@59.94  27000000/858/525 = 59.94 Hz */
 //	0x8c, 0x0a,				//34 - descriptor[0] - 0x0a8c - 27 Mhz
 //	0xd0,					//h - active 0x2d0 (720)
-//	0x8a,					//h - blank 0x8a(138)
+//	0x8a,				det_work_enable	//h - blank 0x8a(138)
 //	0x20,
 //	0xe0,					//v - active 0x1e0 (480)
 //	0x2d,					//v - blank 0x2d (45)
@@ -3785,7 +3785,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
 	if (td->det_changed) {
 		mutex_lock(&td->access_lock);
 		td->det_changed = 0;
-		pr_debug("%s\n", __func__);
+		pr_debug("%s with det_changed\n", __func__);
 		tc358743_minit(td);
 		mutex_unlock(&td->access_lock);
 	}
@@ -4403,9 +4403,14 @@ static void tc_det_worker(struct work_struct *work)
 		goto out2;
 	}
 	u32val = 0;
+	//
+	// read Audio Sample Frequency mode register
+	//
 	ret = tc358743_read_reg(sensor, 0x8621, &u32val);
 	if (ret >= 0) {
+		// Test if audio has changed from previous probing
 		if (td->audio != (((unsigned char)u32val) & 0x0f)) {
+			// Keep only FS(sample frequency) field
 			td->audio = ((unsigned char)u32val) & 0x0f;
 			report_netlink(td);
 		}
@@ -4417,7 +4422,8 @@ static void tc_det_worker(struct work_struct *work)
 		td->det_work_timeout = DET_WORK_TIMEOUT_DEFERRED;
 		goto out;
 	}
-//	pr_info("%s: 852f=%x\n", __func__, u32val);
+	pr_info("%s: EZ: 852f=%x\n", __func__, u852f);
+
 	if (u852f & TC3587430_HDMI_DETECT) {
 		pr_info("%s: hdmi detect %x\n", __func__, u852f);
 		td->lock = u852f & TC3587430_HDMI_DETECT;
@@ -4500,6 +4506,8 @@ static void tc_det_worker(struct work_struct *work)
 		sensor->spix.swidth = tc358743_mode_info_data[td->fps][mode].width;
 		sensor->spix.sheight = tc358743_mode_info_data[td->fps][mode].height;
 		td->det_changed = 1;
+		pr_debug("%s: det_changed=1\n",__func__);
+
 	} else if (td->bounce) {
 		td->bounce--;
 		td->det_work_timeout = DET_WORK_TIMEOUT_DEFAULT;
@@ -4547,6 +4555,7 @@ static ssize_t tc358743_store_regdump(struct device *device,
 	int retval;
 	int size;
 
+	mutex_lock(&td->access_lock);
 	retval = sscanf(buf, "%x", &val);
 	if (retval == 1) {
 		size = get_reg_size(regoffs, 0);
@@ -4554,6 +4563,7 @@ static ssize_t tc358743_store_regdump(struct device *device,
 		if (retval < 0)
 			pr_info("%s: err %d\n", __func__, retval);
 	}
+	mutex_unlock(&td->access_lock);
 	return count;
 }
 
