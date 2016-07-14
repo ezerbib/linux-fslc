@@ -4422,17 +4422,17 @@ static void tc_det_worker(struct work_struct *work)
 		td->det_work_timeout = DET_WORK_TIMEOUT_DEFERRED;
 		goto out;
 	}
-	pr_info("%s: EZ: 852f=%x\n", __func__, u852f);
+	//pr_info("%s: EZ: 852f=%x\n", __func__, u852f);
 
 	if (u852f & TC3587430_HDMI_DETECT) {
-		pr_info("%s: hdmi detect %x\n", __func__, u852f);
+		//pr_info("%s: hdmi detect %x\n", __func__, u852f);
 		td->lock = u852f & TC3587430_HDMI_DETECT;
 		u32val = 0;
 		ret = tc358743_read_reg(sensor, 0x8521, &u32val);
 		if (ret < 0) {
 			pr_err("%s: Error reading mode\n", __func__);
 		}
-		pr_info("%s: lost hdmi_detect 8521=%x\n", __func__, u32val);
+		//pr_info("%s: lost hdmi_detect 8521=%x\n", __func__, u32val);
 		u32val &= 0x0f;
 		// EZ - change to detect 30fps
 		if (u852f==0x3)
@@ -4528,8 +4528,8 @@ static void tc_det_worker(struct work_struct *work)
 		goto out2;
 	}
 out:
-	schedule_delayed_work(&td->det_work, msecs_to_jiffies(td->det_work_timeout));
 out2:
+	schedule_delayed_work(&td->det_work, msecs_to_jiffies(td->det_work_timeout));
 	mutex_unlock(&td->access_lock);
 }
 
@@ -4834,7 +4834,7 @@ static int tc358743_probe(struct i2c_client *client,
 	INIT_DELAYED_WORK(&td->det_work, tc_det_worker);
 	if (sensor->i2c_client->irq) {
 		retval = request_irq(sensor->i2c_client->irq, tc358743_detect_handler,
-				IRQF_SHARED | IRQF_TRIGGER_FALLING,
+				IRQF_SHARED | IRQF_TRIGGER_RISING,
 				"tc358743_det", td);
 		if (retval < 0)
 			dev_warn(&sensor->i2c_client->dev,
