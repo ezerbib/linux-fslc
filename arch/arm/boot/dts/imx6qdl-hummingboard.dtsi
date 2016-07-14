@@ -309,7 +309,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_hummingboard_mipi>;
 		rst-gpios = <&gpio6 15 GPIO_ACTIVE_HIGH>;
-		interrupts-extended = <&gpio2 10 IRQ_TYPE_LEVEL_LOW>;
+		interrupts-extended = <&gpio2 10 IRQ_TYPE_LEVEL_HIGH>;
 		ipu_id = <0>;
 		csi_id = <0>;
 		mclk = <27000000>;
@@ -459,9 +459,9 @@
 			fsl,pins = <
 /*				MX6QDL_PAD_DISP0_DAT19__AUD5_RXD	0x130b0
 				MX6QDL_PAD_KEY_COL0__AUD5_TXC 		0x130b0
-				MX6QDL_PAD_KEY_ROW0__AUD5_TXD 		0x110b0
+				MX6QDL_PAD_KEY_ROW0__AUD5_TXD 		0x110b0*/
 				MX6QDL_PAD_KEY_COL1__AUD5_TXFS 		0x130b0
-				MX6QDL_PAD_GPIO_5__CCM_CLKO1        0x130b0*/
+/*				MX6QDL_PAD_GPIO_5__CCM_CLKO1        0x130b0*/
 			>;
 		};
 
