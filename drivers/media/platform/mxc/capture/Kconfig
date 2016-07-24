@@ -50,7 +50,20 @@ config MXC_HDMI_CSI2_TC358743
 	select MXC_MIPI_CSI2 if ARCH_MX6Q
 	select MXC_CAMERA_SENSOR_CLK
 	---help---
-	  Toshina HDMI to MIPI-CSI2 bridge
+	  Toshiba HDMI to MIPI-CSI2 bridge
+
+config TC358743_DEV
+	bool "Toshiba tc358743 Hdmi to CSI 2 bridge Interrupts device"
+	depends on MXC_HDMI_CSI2_TC358743
+	---help---
+	  Toshiba HDMI to MIPI-CSI2 bridge Interrupts device /dev/tc358743
+
+config TC358743_AUDIO
+	bool "Toshiba tc358743 Hdmi to CSI 2 bridge audio support"
+	depends on MXC_HDMI_CSI2_TC358743
+	---help---
+	  Toshiba HDMI to MIPI-CSI2 bridge Audio
+
 
 config MXC_TVIN_ADV7180
 	tristate "Analog Device adv7180 TV Decoder Input support"

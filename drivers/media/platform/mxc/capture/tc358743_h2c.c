@@ -23,7 +23,6 @@
  *
  */
 #define DEBUG 1
-#define CONFIG_TC358743_AUDIO 1
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -50,7 +49,14 @@
 #include "../../../../../sound/soc/fsl/imx-audmux.h"
 #include "../../../../../sound/soc/fsl/fsl_ssi.h"
 #include <linux/slab.h>
+
 #include "mxc_v4l2_capture.h"
+
+#include "tc358743_h2c.h"
+#ifdef CONFIG_TC358743_DEV
+#include "tc358743_h2c_irq_dev.h"
+#endif
+
 
 #define CODEC_CLOCK 16500000
 /* SSI clock sources */
@@ -69,41 +75,13 @@
 
 #define TC_VOLTAGE_DIGITAL_IO           1800000
 #define TC_VOLTAGE_DIGITAL_CORE         1500000
-#define TC_VOLTAGE_DIGITAL_GPO		1500000
+#define TC_VOLTAGE_DIGITAL_GPO			1500000
 #define TC_VOLTAGE_ANALOG               2800000
 
 #define MAX_COLORBAR	tc358743_mode_INIT6
 #define IS_COLORBAR(a) (a <= MAX_COLORBAR)
 
-enum tc358743_mode {
-	tc358743_mode_INIT, //cb640x480-108MHz
-	tc358743_mode_INIT1,//cb1280x720-2lane@30
-	tc358743_mode_INIT2,//cb1280x720-4lane-125MHz
-	tc358743_mode_INIT3,//cb1024x720-4lane
-	tc358743_mode_INIT4,//cb640x480-174Mhz
-	tc358743_mode_INIT5,//cb1280x720-4lane-300MHz
-	tc358743_mode_INIT6,//ccb1920x1023
-	tc358743_mode_480P_720_480,
-	tc358743_mode_720P_60_1280_720,
-	tc358743_mode_480P_640_480,
-	tc358743_mode_1080P_1920_1080,
-//	tc358743_mode_1440x480,
-	tc358743_mode_720P_1280_720,
-	tc358743_mode_1024x768,
-	tc358743_mode_1440x480,
-	tc358743_mode_720x576,
-	tc358743_mode_2880x480,
-	tc358743_mode_800x600,
-	tc358743_mode_1280x1024,
-	tc358743_mode_848x480,
-	tc358743_mode_1600x900,
-	tc358743_mode_1440x900,
-	tc358743_mode_1600x1200,
-	tc358743_mode_1920x1200,
-//	tc358743_mode_1080P_1920_1080,
-	tc358743_mode_1366x768,
-	tc358743_mode_MAX,
-};
+
 
 enum tc358743_frame_rate {
 	tc358743_60_fps,
@@ -133,34 +111,14 @@ struct tc358743_mode_info {
 	__u32 flags;
 };
 
-/*!
- * Maintains the information on the current state of the sensor.
- */
-struct tc_data {
-	struct sensor_data sensor;
-	struct delayed_work det_work;
-	struct mutex access_lock;
-	int det_work_enable;
-	int det_work_timeout;
-	int det_changed;
-#define REGULATOR_IO		0
-#define REGULATOR_CORE		1
-#define REGULATOR_GPO		2
-#define REGULATOR_ANALOG	3
-#define REGULATOR_CNT		4
-	struct regulator *regulator[REGULATOR_CNT];
-	u32 lock;
-	u32 bounce;
-	enum tc358743_mode mode;
-	u32 fps;
-	u32 audio;
-	int pwn_gpio;
-	int rst_gpio;
-	u16 hpd_active;
-	int edid_initialized;
-};
 
 static struct tc_data *g_td;
+
+struct tc_data *tc358743_get_tc_data()
+{
+	return g_td;
+}
+
 
 
 #define DET_WORK_TIMEOUT_DEFAULT 100
@@ -480,6 +438,7 @@ static const struct reg_value tc358743_setting_YUV422_2lane_30fps_720P_1280_720_
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -561,6 +520,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1024x768_60fps_125MH
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -642,6 +602,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_720P_60fps_1280_720_
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1146,6 +1107,7 @@ static const struct reg_value tc358743_setting_YUV422_2lane_60fps_640_480_125Mhz
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1227,6 +1189,7 @@ static const struct reg_value tc358743_setting_YUV422_2lane_60fps_720_480_125Mhz
 		// HDMI Interrupt Mask
 		  {0x8502, 0x00000001, 0x00000000, 1, 0},
 		  {0x8512, 0x000000fe, 0x00000000, 1, 0},
+		  {0x8513, 0x00000000, 0x00000000, 1, 0},
 		  {0x8514, 0x00000000, 0x00000000, 1, 0},
 		  {0x8515, 0x00000000, 0x00000000, 1, 0},
 		  {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1309,6 +1272,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_2880_480_216Mh
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1390,6 +1354,7 @@ static const struct reg_value tc358743_setting_YUV422_2lane_60fps_800_600_80Mhz[
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1471,6 +1436,7 @@ static const struct reg_value tc358743_setting_YUV422_2lane_60fps_848_840_60Mhz[
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1553,6 +1519,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_1280_1024_182M
 		// HDMI Interrupt Mask
 		  {0x8502, 0x00000001, 0x00000000, 1, 0},
 		  {0x8512, 0x000000fe, 0x00000000, 1, 0},
+		  {0x8513, 0x00000000, 0x00000000, 1, 0},
 		  {0x8514, 0x00000000, 0x00000000, 1, 0},
 		  {0x8515, 0x00000000, 0x00000000, 1, 0},
 		  {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1634,6 +1601,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_1600_900_216Mh
 		// HDMI Interrupt Mask
 		  {0x8502, 0x00000001, 0x00000000, 1, 0},
 		  {0x8512, 0x000000fe, 0x00000000, 1, 0},
+		  {0x8513, 0x00000000, 0x00000000, 1, 0},
 		  {0x8514, 0x00000000, 0x00000000, 1, 0},
 		  {0x8515, 0x00000000, 0x00000000, 1, 0},
 		  {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1716,6 +1684,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_1440_900_213Mh
 		// HDMI Interrupt Mask
 		  {0x8502, 0x00000001, 0x00000000, 1, 0},
 		  {0x8512, 0x000000fe, 0x00000000, 1, 0},
+		  {0x8513, 0x00000000, 0x00000000, 1, 0},
 		  {0x8514, 0x00000000, 0x00000000, 1, 0},
 		  {0x8515, 0x00000000, 0x00000000, 1, 0},
 		  {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1797,6 +1766,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1080P_60fps_1920_108
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -1879,6 +1849,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1080P_30fps_1920_108
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},		// SYSTEM INTERRUPT: clear DDC power change detection interrupt
   {0x8512, 0x000000fe, 0x00000000, 1, 0},		// SYS INTERRUPT MASK: DDC power change detection interrupt not masked
+  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
   {0x8514, 0x00000000, 0x00000000, 1, 0},		// PACKET INTERRUPT MASK: unmask all
   {0x8515, 0x00000000, 0x00000000, 1, 0},		// CBIT INTERRUPT MASK: unmask all
   {0x8516, 0x00000000, 0x00000000, 1, 0},		// AUDIO INTERRUPT MASK: unmask all
@@ -1964,6 +1935,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_1440_480_125Mh
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -2048,6 +2020,7 @@ static const struct reg_value tc358743_setting_YUV422_2lane_60fps_1440_480_54Mhz
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -2134,6 +2107,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_1600_1200_324M
 		// HDMI Interrupt Mask
 		  {0x8502, 0x00000001, 0x00000000, 1, 0},
 		  {0x8512, 0x000000fe, 0x00000000, 1, 0},
+		  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
 		  {0x8514, 0x00000000, 0x00000000, 1, 0},
 		  {0x8515, 0x00000000, 0x00000000, 1, 0},
 		  {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -2223,6 +2197,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_1920_1200_308M
 		// HDMI Interrupt Mask
 		  {0x8502, 0x00000001, 0x00000000, 1, 0},
 		  {0x8512, 0x000000fe, 0x00000000, 1, 0},
+		  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
 		  {0x8514, 0x00000000, 0x00000000, 1, 0},
 		  {0x8515, 0x00000000, 0x00000000, 1, 0},
 		  {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -2308,6 +2283,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1366x768_50fps_158MH
 // HDMI Interrupt Mask
   {0x8502, 0x00000001, 0x00000000, 1, 0},
   {0x8512, 0x000000fe, 0x00000000, 1, 0},
+  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
   {0x8514, 0x00000000, 0x00000000, 1, 0},
   {0x8515, 0x00000000, 0x00000000, 1, 0},
   {0x8516, 0x00000000, 0x00000000, 1, 0},
@@ -2728,7 +2704,7 @@ int get_reg_size(u16 reg, int len)
 	return 0;
 }
 
-static s32 tc358743_read_reg(struct sensor_data *sensor, u16 reg, void *rxbuf)
+s32 tc358743_read_reg(struct sensor_data *sensor, u16 reg, void *rxbuf)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct i2c_msg msgs[2];
@@ -4386,6 +4362,117 @@ static void report_netlink(struct tc_data *td)
 		td->det_work_timeout, tc358743_audio_list[td->audio]);
 }
 
+static void tc_ack_interrupts(struct tc_data *td)
+{
+	int i,n;
+	struct sensor_data *sensor = &td->sensor;
+	u32 u32val;
+	s32 retval;
+	u16 regoffs;
+	u16 t[]={ 0x8502, 0x8503, 0x8504, 0x8505, 0x8507, 0x8508, 0x8509, 0x850b, 0x850f};
+	u16 t2[]={ 0x0016, 0x0014 };
+
+	//mutex_lock(&td->access_lock);
+	n=ARRAY_SIZE(t);
+	u32val=0xff;
+	for (i=0;i<n;i++)
+	{
+		//size = get_reg_size(regoffs, 0);
+		regoffs=t[i];
+		retval = tc358743_write_reg(sensor, regoffs, u32val, 0);
+		if (retval < 0)
+			pr_info("%s: err %d\n", __func__, retval);
+	}
+
+	n=ARRAY_SIZE(t2);
+	u32val=0xffff;
+	for (i=0;i<n;i++)
+	{
+		regoffs=t2[i];
+		retval = tc358743_write_reg(sensor, regoffs, u32val, 0);
+		if (retval < 0)
+			pr_info("%s: err %d\n", __func__, retval);
+	}
+
+	//mutex_unlock(&td->access_lock);
+
+}
+
+static const struct reg_value tc358743_setting_interrupts[] = {
+	{0x0016, 0x000005ff, 0x00000000, 2, 0},
+	// HDMI Interrupt Mask
+	{0x8502, 0x00000001, 0x00000000, 1, 0},
+	{0x8512, 0x000000fe, 0x00000000, 1, 0},
+	{0x8513, 0x0000008f, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
+	{0x8514, 0x000000ff, 0x00000000, 1, 0},
+	{0x8515, 0x000000ff, 0x00000000, 1, 0},
+	{0x8516, 0x000000ff, 0x00000000, 1, 0},
+};
+
+static int tc_run_program(struct tc_data *td,const struct reg_value *pMode, s32 size)
+{
+	struct sensor_data *sensor = &td->sensor;
+	const struct reg_value *pModeSetting = NULL;
+	s32 i = 0;
+	s32 iModeSettingArySize = size;
+	register u32 RepeateLines = 0;
+	register int RepeateTimes = 0;
+	register u32 Delay_ms = 0;
+	register u16 RegAddr = 0;
+	register u32 Mask = 0;
+	register u32 Val = 0;
+	u8  Length;
+	int retval = 0;
+
+	for (i = 0; i < iModeSettingArySize; ++i) {
+		pModeSetting = pMode + i;
+
+		Delay_ms = pModeSetting->u32Delay_ms & (0xffff);
+		RegAddr = pModeSetting->u16RegAddr;
+		Val = pModeSetting->u32Val;
+		Mask = pModeSetting->u32Mask;
+		Length = pModeSetting->u8Length;
+		if (Mask) {
+			u32 RegVal = 0;
+
+			retval = tc358743_read_reg(sensor, RegAddr, &RegVal);
+			if (retval < 0) {
+				pr_err("%s: read failed, reg=0x%x\n", __func__, RegAddr);
+				return retval;
+			}
+			RegVal &= ~(u8)Mask;
+			Val &= Mask;
+			Val |= RegVal;
+		}
+
+		retval = tc358743_write_reg(sensor, RegAddr, Val, Length);
+		if (retval < 0) {
+			pr_err("%s: write failed, reg=0x%x\n", __func__, RegAddr);
+			return retval;
+		}
+		if (Delay_ms)
+			msleep(Delay_ms);
+
+		if (0 != ((pModeSetting->u32Delay_ms>>16) & (0xff))) {
+			if (!RepeateTimes) {
+				RepeateTimes = (pModeSetting->u32Delay_ms>>16) & (0xff);
+				RepeateLines = (pModeSetting->u32Delay_ms>>24) & (0xff);
+			}
+			if (--RepeateTimes > 0) {
+				i -= RepeateLines;
+			}
+		}
+	}
+
+	return retval;
+}
+
+
+static void tc_unmask_interrupts(struct tc_data *td)
+{
+	tc_run_program(td,tc358743_setting_interrupts,ARRAY_SIZE(tc358743_setting_interrupts));
+}
+
 static void tc_det_worker(struct work_struct *work)
 {
 	struct tc_data *td = container_of(work, struct tc_data, det_work.work);
@@ -4402,6 +4489,8 @@ static void tc_det_worker(struct work_struct *work)
 	if (!td->det_work_enable) {
 		goto out2;
 	}
+
+	tc_ack_interrupts(td);
 	u32val = 0;
 	//
 	// read Audio Sample Frequency mode register
@@ -4528,8 +4617,9 @@ static void tc_det_worker(struct work_struct *work)
 		goto out2;
 	}
 out:
-out2:
 	schedule_delayed_work(&td->det_work, msecs_to_jiffies(td->det_work_timeout));
+out2:
+	tc_unmask_interrupts(td);
 	mutex_unlock(&td->access_lock);
 }
 
@@ -4537,9 +4627,21 @@ static irqreturn_t tc358743_detect_handler(int irq, void *data)
 {
 	struct tc_data *td = data;
 	struct sensor_data *sensor = &td->sensor;
+#ifdef CONFIG_TC358743_DEV
+	struct tc358743_irq_private *priv;
+#endif
 
 	pr_debug("%s: IRQ %d\n", __func__, sensor->i2c_client->irq);
 	schedule_delayed_work(&td->det_work, msecs_to_jiffies(10));
+
+#ifdef CONFIG_TC358743_DEV
+	priv=(struct tc358743_irq_private *)data;
+
+	if (priv)
+	{
+		wake_up_interruptible(&priv->alarm_wq);
+	}
+#endif
 	return IRQ_HANDLED;
 }
 
@@ -4704,6 +4806,7 @@ static ssize_t tc358743_show_audio(struct device *dev,
 
 static DEVICE_ATTR(audio, S_IRUGO, tc358743_show_audio, NULL);
 #endif
+
 
 static int tc358743_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
@@ -4873,6 +4976,10 @@ static int tc358743_probe(struct i2c_client *client,
 		goto err3;
 	}
 
+#ifdef CONFIG_TC358743_DEV
+	tc358743_irq_setup();
+#endif
+
 	mutex_unlock(&td->access_lock);
 	pr_debug("%s: finished, error=%d\n", __func__, retval);
 	return retval;
@@ -4966,6 +5073,7 @@ static __init int tc358743_init(void)
 			__func__, err);
 	}
 #endif
+
 	return err;
 }
 
@@ -4983,6 +5091,7 @@ static void __exit tc358743_clean(void)
 #endif
 	i2c_del_driver(&tc358743_i2c_driver);
 }
+
 
 module_init(tc358743_init);
 module_exit(tc358743_clean);
