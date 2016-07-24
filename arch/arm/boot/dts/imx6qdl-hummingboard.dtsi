@@ -411,7 +411,7 @@
 
 		pinctrl_hummingboard_mipi: hummingboard_mipi {
 			fsl,pins = <
-				MX6QDL_PAD_SD4_DAT2__GPIO2_IO10 0x17059
+				MX6QDL_PAD_SD4_DAT2__GPIO2_IO10 0x000018
 				MX6QDL_PAD_NANDF_CS2__GPIO6_IO15 0x13059
 			>;
 		};
