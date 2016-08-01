@@ -4631,14 +4631,15 @@ static irqreturn_t tc358743_detect_handler(int irq, void *data)
 	struct tc358743_irq_private *priv;
 #endif
 
-	pr_debug("%s: IRQ %d\n", __func__, sensor->i2c_client->irq);
+	//pr_debug("%s: IRQ %d\n", __func__, sensor->i2c_client->irq);
 	schedule_delayed_work(&td->det_work, msecs_to_jiffies(10));
 
 #ifdef CONFIG_TC358743_DEV
-	priv=(struct tc358743_irq_private *)data;
-
+	priv=td->tc_irq_priv;
+	pr_debug("%s: IRQ %d priv=%p\n", __func__, sensor->i2c_client->irq,priv);
 	if (priv)
 	{
+		atomic_inc(&priv->event);
 		wake_up_interruptible(&priv->alarm_wq);
 	}
 #endif
@@ -4924,10 +4925,6 @@ static int tc358743_probe(struct i2c_client *client,
 		goto err4;
 	}
 	chip_id_high = (u8)u32val;
-
-	tc358743_int_device.priv = td;
-	if (!g_td)
-		g_td = td;
 
 	tc358743_int_device.priv = td;
 	if (!g_td)

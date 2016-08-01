@@ -4,20 +4,6 @@
  *  Created on: Jul 24, 2016
  *      Author: ezerbib
  */
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/slab.h>
-#include <linux/ctype.h>
-#include <linux/types.h>
-#include <linux/delay.h>
-#include <linux/device.h>
-#include <linux/clk.h>
-#include <linux/i2c.h>
-#include <linux/of_gpio.h>
-#include <linux/slab.h>
-#include <linux/poll.h>
-#include <linux/cdev.h>
-#include <linux/mutex.h>
 
 #include "mxc_v4l2_capture.h"
 #include "tc358743_h2c.h"
@@ -25,7 +11,6 @@
 #ifdef CONFIG_TC358743_DEV
 #include "tc358743_h2c_irq_dev.h"
 #endif
-
 
 static const struct file_operations tc358743_irq_fops = {
 	.owner       = THIS_MODULE,
@@ -37,11 +22,12 @@ static const struct file_operations tc358743_irq_fops = {
 	.release     = tc358743_irq_release,
 };
 
-
+//static TC358743_INT_REG IntData = {};
+static struct cdev *c_dev;
+static char tc358743_irq_name[] = "tc358743_irq";
 static struct tc358743_irq_private *alarmlist=NULL;
-static int irq_requested = 0;
 static DEFINE_SPINLOCK(alarm_lock);
-static DEFINE_SPINLOCK(gpio_lock);
+//static DEFINE_SPINLOCK(gpio_lock);
 
 static DEFINE_MUTEX(tc358743_irq_mutex);
 
@@ -89,37 +75,18 @@ static unsigned int tc358743_irq_poll(struct file *file, struct poll_table_struc
 {
 	unsigned int mask = 0;
 	struct tc358743_irq_private *priv = (struct tc358743_irq_private *)file->private_data;
-	unsigned long data = 0;
+	//unsigned long data = 0;
 	poll_wait(file, &priv->alarm_wq, wait);
 
-#if 1
 	if (priv->minor == TC358743_DEV_MINOR_A)
 	{
-		//unsigned long tmp;
-		unsigned long flags;
-
-		local_irq_save(flags);
-/// TODO: real content or irq
-		spin_lock_irq(&gpio_lock);
-		data |= IntData.P0IntStatR & priv->intalarm.P0IntStatR;
-		data |= IntData.P0IntStatF & priv->intalarm.P0IntStatF;
-		data |= IntData.P2IntStatR & priv->intalarm.P2IntStatR;
-		data |= IntData.P2IntStatF & priv->intalarm.P2IntStatF;
-		spin_unlock_irq(&gpio_lock);
-		local_irq_restore(flags);
+		if (priv->event_count != atomic_read(&priv->event))
+				return POLLIN | POLLRDNORM;
 	}
 	else
 	{
 		return 0;
 	}
-#endif
-
-	if (data)
-	{
-		mask = POLLIN|POLLRDNORM;
-	}
-
-	printk(KERN_DEBUG "gpio_poll ready: mask 0x%08X\n", mask);
 	return mask;
 
 }
@@ -140,7 +107,11 @@ tc358743_irq_ioctl(struct file *file,
 				/** TODO: return TC358743 Hdmi registers ...*/
 				u32 RegVal = 0;
 				s32 retval;
+				struct tc_data *td;
+				td = tc358743_get_tc_data();
+				mutex_lock(&td->access_lock);
 				retval = tc358743_read_reg(priv->sensor, arg, &RegVal);
+				mutex_unlock(&td->access_lock);
 				if (retval < 0) {
 					pr_err("%s: read failed, reg=0x%lx\n", __func__, arg);
 					return -EINVAL;
@@ -203,54 +174,95 @@ tc358743_irq_ioctl(struct file *file,
 	return 0;
 }
 
-static ssize_t tc358743_irq_read(struct file *file, char *buf, size_t len, loff_t *ppos)
+static ssize_t tc358743_irq_read(struct file *file, char __user *buf,
+				size_t len, loff_t *ppos)
 {
 	DECLARE_WAITQUEUE(wait, current);
-	unsigned long data[4]={};
-	unsigned long _data=0;
+	//unsigned long data[4]={};
+	//unsigned long _data=0;
 	ssize_t retval;
 	struct tc358743_irq_private *devp;
-
+	s32 event_count;
+	printk(KERN_DEBUG "tc358743_irq_read: before read: \n");
 	devp = file->private_data;
 
-	if (len < sizeof(unsigned long))
+	//if (len < sizeof(unsigned long))
+	//	return -EINVAL;
+	if (len != sizeof(s32))
 		return -EINVAL;
+
 
 	add_wait_queue(&devp->alarm_wq, &wait);
 
 	for ( ; ; ) {
+		//u16 RegAddr = 0x8520;
+		//u32 RegVal = 0;
+		//s32 retval2 = 0;
+		//struct tc_data *td;
 		set_current_state(TASK_INTERRUPTIBLE);
 
-		spin_lock_irq(&gpio_lock);
-		data[0] |= IntData.P0IntStatR & devp->intalarm.P0IntStatR;
-		data[1] |= IntData.P0IntStatF & devp->intalarm.P0IntStatF;
-		data[2] |= IntData.P2IntStatR & devp->intalarm.P2IntStatR;
-		data[3] |= IntData.P2IntStatF & devp->intalarm.P2IntStatF;
-		_data =data[0]|data[1]|data[2]|data[3];
-		IntData.P0IntStatR=0;
-		IntData.P0IntStatF=0;
-		IntData.P2IntStatR=0;
-		IntData.P2IntStatF=0;
-		spin_unlock_irq(&gpio_lock);
-
-		if (_data)
+		event_count = atomic_read(&devp->event);
+		if (event_count != devp->event_count) {
+			printk(KERN_DEBUG "tc358743_irq_read: ev=%d : dev=%d\n",event_count,devp->event_count);
+			if (copy_to_user(buf, &event_count, len))
+			{
+				retval = -EFAULT;
+				printk(KERN_DEBUG "tc358743_irq_read: retval = -EFAULT;\n");
+			}
+			else {
+				devp->event_count = event_count;
+				retval = len;
+			}
 			break;
-		else if (file->f_flags & O_NONBLOCK) {
+
+		}
+
+		//spin_lock_irq(&gpio_lock);
+		//data[0] |= IntData.P0IntStatR & devp->intalarm.P0IntStatR;
+		//data[1] |= IntData.P0IntStatF & devp->intalarm.P0IntStatF;
+		//data[2] |= IntData.P2IntStatR & devp->intalarm.P2IntStatR;
+		//data[3] |= IntData.P2IntStatF & devp->intalarm.P2IntStatF;
+		//_data =data[0]|data[1]|data[2]|data[3];
+		//IntData.P0IntStatR=0;
+		//IntData.P0IntStatF=0;
+		//IntData.P2IntStatR=0;
+		//IntData.P2IntStatF=0;
+		//td = tc358743_get_tc_data();
+		//mutex_lock(&td->access_lock);
+		//retval2 = tc358743_read_reg(devp->sensor, RegAddr , &RegVal);
+		//if (retval2 < 0) {
+		//	pr_err("%s: read failed, reg=0x%x\n", __func__, RegAddr);
+		//}
+		//mutex_unlock(&td->access_lock);
+		//data[0]=(RegVal&0xFF);
+		//spin_unlock_irq(&gpio_lock);
+
+		//if (! retval2)
+		//{
+		//	break;
+		//}
+		//else
+		if (file->f_flags & O_NONBLOCK)
+		{
 			retval = -EAGAIN;
 			goto out;
-		} else if (signal_pending(current)) {
+		}
+		else if (signal_pending(current))
+		{
 			retval = -ERESTARTSYS;
 			goto out;
 		}
 		schedule();
 	}
 
-	retval = put_user(data[0], (unsigned long __user *)buf);
-	retval |= put_user(data[1], ((unsigned long __user *)buf)+1);
-	retval |= put_user(data[2], ((unsigned long __user *)buf)+2);
-	retval |= put_user(data[3], ((unsigned long __user *)buf)+3);
-	if (!retval)
-		retval = sizeof(unsigned long)*4;
+	//retval = put_user(data[0], (unsigned long __user *)buf);
+	//retval |= put_user(data[1], ((unsigned long __user *)buf)+1);
+	//retval |= put_user(data[2], ((unsigned long __user *)buf)+2);
+	//retval |= put_user(data[3], ((unsigned long __user *)buf)+3);
+	//if (!retval)
+	//	retval = sizeof(unsigned long)*4;
+	printk(KERN_DEBUG "tc358743_irq_read: after read: \n");
+
 out:
 	__set_current_state(TASK_RUNNING);
 	remove_wait_queue(&devp->alarm_wq, &wait);
@@ -282,13 +294,16 @@ static int tc358743_irq_open(struct inode *inode, struct file *filp)
 
 	/* initialize the io/alarm struct */
 
-	priv->intalarm.P0IntStatF = 0;
-	priv->intalarm.P0IntStatR = 0;
-	priv->intalarm.P2IntStatF = 0;
-	priv->intalarm.P2IntStatR = 0;
+	//priv->intalarm.P0IntStatF = 0;
+	//priv->intalarm.P0IntStatR = 0;
+	//priv->intalarm.P2IntStatF = 0;
+	//priv->intalarm.P2IntStatR = 0;
+	//priv->intalarm.Reg_8520 = 0;
 	init_waitqueue_head(&priv->alarm_wq);
 
+	priv->event_count = atomic_read(&priv->event);
 	filp->private_data = (void *)priv;
+	td->tc_irq_priv=priv;
 
 	priv->rbufhead = 0;
 	priv->rbufcnt = 0;
@@ -315,10 +330,12 @@ static int tc358743_irq_open(struct inode *inode, struct file *filp)
 static int
 tc358743_irq_release(struct inode *inode, struct file *filp)
 {
+	int ret = 0;
 	struct tc358743_irq_private *p;
 	struct tc358743_irq_private *todel;
 	/* local copies while updating them: */
 	unsigned long some_alarms;
+	struct tc_data *td = tc358743_get_tc_data();
 
 	/* unlink from alarmlist and free the private structure */
 
@@ -345,18 +362,15 @@ tc358743_irq_release(struct inode *inode, struct file *filp)
 		p = p->next;
 	}
 
-	if ((some_alarms==0)&&(irq_requested == 1))
+	if (some_alarms==0)
 	{
-#if 0
-		free_irq(GPIO_IRQn, todel);
-#endif
-		irq_requested = 0;
+		td->tc_irq_priv=NULL;
 	}
 
 	kfree(todel);
 
 	spin_unlock_irq(&alarm_lock);
 
-	return 0;
+	return ret;
 }
 

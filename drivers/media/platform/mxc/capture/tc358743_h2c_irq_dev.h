@@ -61,18 +61,9 @@
                                */
 typedef struct
 {
-	volatile uint32_t P0IntStatR;
-	volatile uint32_t P0IntStatF;
-	volatile uint32_t P2IntStatR;
-	volatile uint32_t P2IntStatF;
+	uint32_t Reg_8520;
 } TC358743_INT_REG;
 
-static TC358743_INT_REG IntData = {};
-
-
-static struct cdev *c_dev;
-
-static char tc358743_irq_name[] = "tc358743_irq";
 extern void tc358743_irq_setup(void);
 //static int tc358743_irq_ioctl(struct inode *inode, struct file *file,
 //	unsigned int cmd, unsigned long arg);
@@ -97,6 +88,8 @@ struct tc358743_irq_private {
 	struct sensor_data              *sensor;
 	/* These fields are generic */
 	wait_queue_head_t               alarm_wq;
+	atomic_t						event;
+	s32 							event_count;
 	int                             minor;
 };
 
