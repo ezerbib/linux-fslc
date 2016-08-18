@@ -4407,6 +4407,7 @@ static const struct reg_value tc358743_setting_interrupts[] = {
 	{0x8514, 0x000000ff, 0x00000000, 1, 0},
 	{0x8515, 0x000000ff, 0x00000000, 1, 0},
 	{0x8516, 0x000000ff, 0x00000000, 1, 0},
+	{0x851B, 0x000000fd, 0x00000000, 1, 0},     // unmask Sync_chg
 };
 
 static int tc_run_program(struct tc_data *td,const struct reg_value *pMode, s32 size)

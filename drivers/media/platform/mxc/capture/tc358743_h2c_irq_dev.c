@@ -127,44 +127,13 @@ tc358743_irq_ioctl(struct file *file,
 
 		case IO_HIGHALARM:
 			{
-#if 0
-				int portnum=arg/32;
-				int pinnum=arg%32;
-				if (portnum==0)
-				{
-					priv->intalarm.P0IntStatR |=  (1<<pinnum);
-					//pr_info("lpcpio:install raise alarm for port:%d, pin:%d\n",portnum,pinnum);
-				}
-				else if (portnum==2)
-				{
-					priv->intalarm.P2IntStatR |=  (1<<pinnum);
-					//pr_info("lpcpio:install raise alarm for port:%d, pin:%d\n",portnum,pinnum);
-				}
-				else
-
-					return -EINVAL;
-#endif
+			return -EINVAL;
 			}
 			break;
 
 		case IO_LOWALARM:
 			{
-#if 0
-				int portnum=arg/32;
-				int pinnum=arg%32;
-				if (portnum==0)
-				{
-					priv->intalarm.P0IntStatF |=  (1<<pinnum);
-					//pr_info("lpcpio:install falling alarm for port:%d, pin:%d\n",portnum,pinnum);
-				}
-				else if (portnum==2)
-				{
-					priv->intalarm.P2IntStatF |=  (1<<pinnum);
-					//pr_info("lpcpio:install falling alarm for port:%d, pin:%d\n",portnum,pinnum);
-				}
-				else
-					return -EINVAL;
-#endif
+			return -EINVAL;
 			}
 			break;
 		default:
@@ -178,16 +147,12 @@ static ssize_t tc358743_irq_read(struct file *file, char __user *buf,
 				size_t len, loff_t *ppos)
 {
 	DECLARE_WAITQUEUE(wait, current);
-	//unsigned long data[4]={};
-	//unsigned long _data=0;
 	ssize_t retval;
 	struct tc358743_irq_private *devp;
 	s32 event_count;
-	printk(KERN_DEBUG "tc358743_irq_read: before read: \n");
+	//printk(KERN_DEBUG "tc358743_irq_read: before read: \n");
 	devp = file->private_data;
 
-	//if (len < sizeof(unsigned long))
-	//	return -EINVAL;
 	if (len != sizeof(s32))
 		return -EINVAL;
 
@@ -195,15 +160,11 @@ static ssize_t tc358743_irq_read(struct file *file, char __user *buf,
 	add_wait_queue(&devp->alarm_wq, &wait);
 
 	for ( ; ; ) {
-		//u16 RegAddr = 0x8520;
-		//u32 RegVal = 0;
-		//s32 retval2 = 0;
-		//struct tc_data *td;
 		set_current_state(TASK_INTERRUPTIBLE);
 
 		event_count = atomic_read(&devp->event);
 		if (event_count != devp->event_count) {
-			printk(KERN_DEBUG "tc358743_irq_read: ev=%d : dev=%d\n",event_count,devp->event_count);
+			//printk(KERN_DEBUG "tc358743_irq_read: ev=%d : dev=%d\n",event_count,devp->event_count);
 			if (copy_to_user(buf, &event_count, len))
 			{
 				retval = -EFAULT;
@@ -217,31 +178,6 @@ static ssize_t tc358743_irq_read(struct file *file, char __user *buf,
 
 		}
 
-		//spin_lock_irq(&gpio_lock);
-		//data[0] |= IntData.P0IntStatR & devp->intalarm.P0IntStatR;
-		//data[1] |= IntData.P0IntStatF & devp->intalarm.P0IntStatF;
-		//data[2] |= IntData.P2IntStatR & devp->intalarm.P2IntStatR;
-		//data[3] |= IntData.P2IntStatF & devp->intalarm.P2IntStatF;
-		//_data =data[0]|data[1]|data[2]|data[3];
-		//IntData.P0IntStatR=0;
-		//IntData.P0IntStatF=0;
-		//IntData.P2IntStatR=0;
-		//IntData.P2IntStatF=0;
-		//td = tc358743_get_tc_data();
-		//mutex_lock(&td->access_lock);
-		//retval2 = tc358743_read_reg(devp->sensor, RegAddr , &RegVal);
-		//if (retval2 < 0) {
-		//	pr_err("%s: read failed, reg=0x%x\n", __func__, RegAddr);
-		//}
-		//mutex_unlock(&td->access_lock);
-		//data[0]=(RegVal&0xFF);
-		//spin_unlock_irq(&gpio_lock);
-
-		//if (! retval2)
-		//{
-		//	break;
-		//}
-		//else
 		if (file->f_flags & O_NONBLOCK)
 		{
 			retval = -EAGAIN;
@@ -255,13 +191,7 @@ static ssize_t tc358743_irq_read(struct file *file, char __user *buf,
 		schedule();
 	}
 
-	//retval = put_user(data[0], (unsigned long __user *)buf);
-	//retval |= put_user(data[1], ((unsigned long __user *)buf)+1);
-	//retval |= put_user(data[2], ((unsigned long __user *)buf)+2);
-	//retval |= put_user(data[3], ((unsigned long __user *)buf)+3);
-	//if (!retval)
-	//	retval = sizeof(unsigned long)*4;
-	printk(KERN_DEBUG "tc358743_irq_read: after read: \n");
+	//printk(KERN_DEBUG "tc358743_irq_read: after read: \n");
 
 out:
 	__set_current_state(TASK_RUNNING);
@@ -293,12 +223,6 @@ static int tc358743_irq_open(struct inode *inode, struct file *filp)
 	priv->minor = TC358743_DEV_MINOR_A;
 
 	/* initialize the io/alarm struct */
-
-	//priv->intalarm.P0IntStatF = 0;
-	//priv->intalarm.P0IntStatR = 0;
-	//priv->intalarm.P2IntStatF = 0;
-	//priv->intalarm.P2IntStatR = 0;
-	//priv->intalarm.Reg_8520 = 0;
 	init_waitqueue_head(&priv->alarm_wq);
 
 	priv->event_count = atomic_read(&priv->event);
