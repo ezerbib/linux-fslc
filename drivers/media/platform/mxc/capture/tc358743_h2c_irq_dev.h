@@ -65,16 +65,6 @@ typedef struct
 } TC358743_INT_REG;
 
 extern void tc358743_irq_setup(void);
-//static int tc358743_irq_ioctl(struct inode *inode, struct file *file,
-//	unsigned int cmd, unsigned long arg);
-
-static long tc358743_irq_ioctl (struct file *, unsigned int cmd, unsigned long arg);
-static ssize_t tc358743_irq_read(struct file *file, char *buf, size_t len, loff_t *ppos);
-static ssize_t tc358743_irq_write(struct file *file, const char *buf, size_t count,
-	loff_t *off);
-static int tc358743_irq_open(struct inode *inode, struct file *filp);
-static int tc358743_irq_release(struct inode *inode, struct file *filp);
-static unsigned int tc358743_irq_poll(struct file *file, struct poll_table_struct *wait);
 
 /* private data per open() of this driver */
 struct tc358743_irq_private {

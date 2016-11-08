@@ -602,6 +602,33 @@ static void gen_text(struct vivi_dev *dev, char *basep,
 	}
 }
 
+static void vivi_fillbuff_black(struct vivi_dev *dev, struct vivi_buffer *buf)
+{
+	int stride = dev->width * dev->pixelsize;
+	int hmax = dev->height;
+	void *vbuf = vb2_plane_vaddr(&buf->vb, 0);
+	u8 *linestart;
+	//int h, line = 1;
+	static int is_set=0;
+
+	if (!vbuf)
+		return;
+	linestart = dev->line + (dev->mv_count % dev->width) * dev->pixelsize;
+
+	//for (h = 0; h < hmax; h++)
+	//	memcpy(vbuf + h * stride, linestart, stride);
+	if (!is_set)
+	{
+		memset(vbuf , 0x00, stride *hmax);
+		is_set=1;
+	}
+
+	buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
+	dev->field_count++;
+	buf->vb.v4l2_buf.sequence = dev->field_count >> 1;
+	buf->vb.v4l2_buf.index = dev->field_count ;
+}
+#if 0
 static void vivi_fillbuff(struct vivi_dev *dev, struct vivi_buffer *buf)
 {
 	int stride = dev->width * dev->pixelsize;
@@ -677,8 +704,8 @@ static void vivi_fillbuff(struct vivi_dev *dev, struct vivi_buffer *buf)
 	buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
 	dev->field_count++;
 	buf->vb.v4l2_buf.sequence = dev->field_count >> 1;
-	v4l2_get_timestamp(&buf->vb.v4l2_buf.timestamp);
-}
+ }
+#endif
 
 static void vivi_thread_tick(struct vivi_dev *dev)
 {
@@ -702,7 +729,8 @@ static void vivi_thread_tick(struct vivi_dev *dev)
 	v4l2_get_timestamp(&buf->vb.v4l2_buf.timestamp);
 
 	/* Fill buffer */
-	vivi_fillbuff(dev, buf);
+	//vivi_fillbuff(dev, buf);
+	vivi_fillbuff_black(dev, buf);
 	dprintk(dev, 1, "filled buffer %p\n", buf);
 
 	vb2_buffer_done(&buf->vb, VB2_BUF_STATE_DONE);

@@ -12,6 +12,14 @@
 #include "tc358743_h2c_irq_dev.h"
 #endif
 
+static long tc358743_irq_ioctl (struct file *, unsigned int cmd, unsigned long arg);
+static ssize_t tc358743_irq_read(struct file *file, char *buf, size_t len, loff_t *ppos);
+static ssize_t tc358743_irq_write(struct file *file, const char *buf, size_t count,
+	loff_t *off);
+static int tc358743_irq_open(struct inode *inode, struct file *filp);
+static int tc358743_irq_release(struct inode *inode, struct file *filp);
+static unsigned int tc358743_irq_poll(struct file *file, struct poll_table_struct *wait);
+
 static const struct file_operations tc358743_irq_fops = {
 	.owner       = THIS_MODULE,
 	.poll        = tc358743_irq_poll,
@@ -25,7 +33,7 @@ static const struct file_operations tc358743_irq_fops = {
 //static TC358743_INT_REG IntData = {};
 static struct cdev *c_dev;
 static char tc358743_irq_name[] = "tc358743_irq";
-static struct tc358743_irq_private *alarmlist=NULL;
+//static struct tc358743_irq_private *alarmlist=NULL;
 static DEFINE_SPINLOCK(alarm_lock);
 //static DEFINE_SPINLOCK(gpio_lock);
 
@@ -235,17 +243,10 @@ static int tc358743_irq_open(struct inode *inode, struct file *filp)
 	priv->sensor = sensor;
 
 	/* link it into our alarmlist */
-	spin_lock_irq(&alarm_lock);
-	priv->next = alarmlist;
-	alarmlist = priv;
-	spin_unlock_irq(&alarm_lock);
-
-#if 0
-	if(0!=install_irq(GPIO_IRQn,GPIO_IRQHandler,NORMAL_PRIORITY))
-	{
-		pr_err("lpc178x:  failed to install gpio irqs\n");
-	}
-#endif
+	//spin_lock_irq(&alarm_lock);
+	//priv->next = alarmlist;
+	//alarmlist = priv;
+	//spin_unlock_irq(&alarm_lock);
 
 	mutex_unlock(&tc358743_irq_mutex);
 	return 0;
@@ -255,28 +256,28 @@ static int
 tc358743_irq_release(struct inode *inode, struct file *filp)
 {
 	int ret = 0;
-	struct tc358743_irq_private *p;
+	//struct tc358743_irq_private *p;
 	struct tc358743_irq_private *todel;
 	/* local copies while updating them: */
-	unsigned long some_alarms;
+	//unsigned long some_alarms;
 	struct tc_data *td = tc358743_get_tc_data();
 
 	/* unlink from alarmlist and free the private structure */
 
 	spin_lock_irq(&alarm_lock);
-	p = alarmlist;
+	//p = alarmlist;
 	todel = (struct tc358743_irq_private *)filp->private_data;
 
-	if (p == todel) {
+	/*if (p == todel) {
 		alarmlist = todel->next;
 	} else {
 		while (p->next != todel)
 			p = p->next;
 		p->next = todel->next;
 	}
-
+    */
 	/* Check if there are still any alarms set */
-	p = alarmlist;
+	/*p = alarmlist;
 	some_alarms = 0;
 	while (p) {
 		if (p->minor == TC358743_DEV_MINOR_A)
@@ -290,7 +291,8 @@ tc358743_irq_release(struct inode *inode, struct file *filp)
 	{
 		td->tc_irq_priv=NULL;
 	}
-
+*/
+	td->tc_irq_priv=NULL;
 	kfree(todel);
 
 	spin_unlock_irq(&alarm_lock);
