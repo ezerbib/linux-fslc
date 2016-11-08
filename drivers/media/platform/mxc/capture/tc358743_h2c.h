@@ -9,6 +9,7 @@
 #define DRIVERS_MEDIA_PLATFORM_MXC_CAPTURE_TC358743_H2C_H_
 
 enum tc358743_mode {
+	tc358743_mode_INIT0, //1080p60
 	tc358743_mode_INIT, //cb640x480-108MHz
 	tc358743_mode_INIT1,//cb1280x720-2lane@30
 	tc358743_mode_INIT2,//cb1280x720-4lane-125MHz
@@ -62,6 +63,7 @@ struct tc_data {
 	int rst_gpio;
 	u16 hpd_active;
 	int edid_initialized;
+	int irq_changed;
 #ifdef CONFIG_TC358743_DEV
 	struct tc358743_irq_private *tc_irq_priv;
 #endif
