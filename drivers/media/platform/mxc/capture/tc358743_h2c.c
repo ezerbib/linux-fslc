@@ -4383,10 +4383,13 @@ static void report_netlink(struct tc_data *td)
 			tc358743_fps_list[td->fps], tc358743_audio_list[td->audio]);
 	kobject_uevent_env(&(sensor->i2c_client->dev.kobj), KOBJ_CHANGE, envp);
 	td->det_work_timeout = DET_WORK_TIMEOUT_DEFAULT;
-	pr_debug("%s: HDMI RX (%d) mode: %s fps: %d (%d, %d) audio: %d\n",
+	pr_debug("%s: HDMI RX (%d) mode: %s fps: %d (bounce:%d, det_to:%d) audio: %d\n",
 		__func__, td->mode,
-		tc358743_mode_info_data[td->fps][td->mode].name, td->fps, td->bounce,
-		td->det_work_timeout, tc358743_audio_list[td->audio]);
+		tc358743_mode_info_data[td->fps][td->mode].name,
+		(td->fps==tc358743_60_fps)?60:30,
+		td->bounce,
+		td->det_work_timeout,
+		tc358743_audio_list[td->audio]);
 }
 
 static void tc_ack_interrupts(struct tc_data *td)
@@ -4648,10 +4651,14 @@ static void tc_det_worker(struct work_struct *work)
 	if (td->mode != mode) {
 		td->det_work_timeout = DET_WORK_TIMEOUT_DEFAULT;
 		td->bounce = MAX_BOUNCE;
-		pr_debug("%s: HDMI RX (%d != %d) mode: %s fps: %d (%d, %d)\n",
-				__func__, td->mode, mode,
+		pr_debug("%s: HDMI RX (old mode:%d != new mode:%d) mode: %s fps: %d (%d, %d)\n",
+				__func__,
+				td->mode,
+				mode,
 				tc358743_mode_info_data[td->fps][mode].name,
-				td->fps, td->bounce, td->det_work_timeout);
+				td->fps,
+				td->bounce,
+				td->det_work_timeout);
 		td->mode = mode;
 		sensor->streamcap.capturemode = mode;
 		sensor->spix.swidth = tc358743_mode_info_data[td->fps][mode].width;

@@ -22,3 +22,10 @@ my_go_install_enc()
 {
 my_go_install 68.150
 }
+
+my_go_install_mnt () 
+{ 
+    ip=$1;
+    rsync -avvr -r release/lib/modules root@192.168.$ip:/mnt/lib;
+    scp arch/arm/boot/zImage root@192.168.$ip:/mnt//boot/zImage-3.14.59-rt59+.new
+}
