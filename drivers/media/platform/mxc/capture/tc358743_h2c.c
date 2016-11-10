@@ -51,6 +51,7 @@
 #include <linux/slab.h>
 
 #include "mxc_v4l2_capture.h"
+#include "tc358743_regs.h"
 
 #include "tc358743_h2c.h"
 #ifdef CONFIG_TC358743_DEV
@@ -63,7 +64,7 @@
 #define IMX_SSP_SYS_CLK		0
 
 #define MIN_FPS 30
-#define MAX_FPS 60
+#define MAX_FPS 75
 #define DEFAULT_FPS 60
 
 #define TC358743_XCLK_MIN 27000000
@@ -75,18 +76,25 @@
 
 #define TC_VOLTAGE_DIGITAL_IO           1800000
 #define TC_VOLTAGE_DIGITAL_CORE         1500000
-#define TC_VOLTAGE_DIGITAL_GPO			1500000
+#define TC_VOLTAGE_DIGITAL_GPO		1500000
 #define TC_VOLTAGE_ANALOG               2800000
 
 #define MAX_COLORBAR	tc358743_mode_INIT6
 #define IS_COLORBAR(a) (a <= MAX_COLORBAR)
 
-
-
 enum tc358743_frame_rate {
 	tc358743_60_fps,
 	tc358743_30_fps,
+	tc358743_75_fps,
 	tc358743_max_fps
+};
+
+static char tc358743_fps_list[tc358743_max_fps+1] =
+{
+[tc358743_60_fps] = 60,
+[tc358743_30_fps] = 30,
+[tc358743_75_fps] = 75,
+[tc358743_max_fps] = 0
 };
 
 struct reg_value {
@@ -110,7 +118,6 @@ struct tc358743_mode_info {
 	u32 init_data_size;
 	__u32 flags;
 };
-
 
 static struct tc_data *g_td;
 
@@ -192,113 +199,6 @@ static int tc_regulator_init(struct tc_data *td, struct device *dev)
 	return ret;
 }
 
-static void det_work_enable(struct tc_data *td, int enable)
-{
-	td->det_work_enable = enable;
-	td->det_work_timeout = DET_WORK_TIMEOUT_DEFERRED;
-	if (enable)
-		schedule_delayed_work(&td->det_work, msecs_to_jiffies(10));
-	pr_debug("%s: %d %d\n", __func__, td->det_work_enable, td->det_work_timeout);
-}
-
-//static const u8 cHDMIEDID[256] = {
-//	/* This is the edid that KDS should return */
-//	0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,		//0 - header[8] - fixed pattern
-//	0x2d, 0xb2,						//8 - manufacturer_name[2]
-//	0x73, 0x06,						//10 - product_code[2]
-//	0xd6, 0x12, 0x00, 0x00,					//12 - serial_number[4]
-//	0x16,							//16 - week
-//	0x1A,							//17 - year 26+1990=2016
-//	0x01,							//18 - version
-//	0x03,							//19 - revision
-//	0x80,							//20 - video_input_definition(digital input)
-//	0x34,							//21 - max_size_horizontal 52cm
-//	0x1d,							//22 - max_size_vertical 29cm
-//	0x78,							//23 - gamma
-//	0x3a,							//24 - feature_support (RGB 4:4:4 + YCrCb 4:4:4 + YCrCb 4:2:2)
-//	0xc7, 0x20, 0xa4, 0x55, 0x49, 0x99, 0x27, 0x13, 0x50, 0x54,	//25 - color_characteristics[10]
-//	0xbf, 0xef, 0x00,					//35 - established_timings[3]
-//	0x71, 0x4f, 0x81, 0x40, 0x81, 0x80, 0x95, 0x00, 0xb3, 0x00, 0xd1, 0xc0, 0x01, 0x01, 0x01, 0x01,	//38 - standard_timings[8]
-///* 1080P */
-//	0x02, 0x3a,						//54(0) - descriptor[0], 0x3a02 = 148.50 MHz
-//	0x80,							//56(2) h - active 0x780 (1920)
-//	0x18,							//57(3) h - blank 0x118 (280)
-//	0x71,							//58(4)
-//	0x38,							//59(5) v - active 0x438 (1080)
-//	0x2d,							//60(6) v - blank 0x02d(45)
-//	0x40,							//61(7)
-//	0x58,							//62(8) - h sync offset(0x58)
-//	0x2c,							//63(9) - h sync width(0x2c)
-//	0x45,							//64(10) - v sync offset(0x4), v sync width(0x5)
-//	0x00,							//65(11)
-//	0x09,							//66(12) - h display size (0x209) 521 mm
-//	0x25,							//67(13) - v display size (0x125) 293 mm
-//	0x21,							//68(14)
-//	0x00,							//69(15) - h border pixels
-//	0x00,							//70(16) - v border pixels
-//	0x1e,							//71(17) - no stereo, digital separate, hsync+, vsync+
-//	0x00, 0x00, 0x00, 0xff, 0x00,							//72 - descriptor[1]
-//	0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x0a, 0x20, 	//"00000000000\n "
-//	0x00, 0x00, 0x00, 0xfd, 0x00,							//90 - descriptor[2]
-//	0x37, 0x4b, 0x1e, 0x55, 0x10, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-//	0x00, 0x00, 0x00, 0xfc, 0x00, 							//108 - descriptor[3]
-//	0x4b, 0x44, 0x53, 0x2d, 0x4b, 0x45, 0x4e, 0x43, 0x34, 0x0a, 0x00, 0x00,	0x00,	//"KDS-KENC4\n"
-//	0x01,							//126 - extension_flag
-//	0x39,							//127 - checksum
-//
-//	0x02,							//0 - cea-861 extension
-//	0x03,							//1 - rev 3
-//	0x22,							//2 - detailed timings at offset 34
-//	0x71,							//3 - # of detailed timing descriptor
-//	0x4f, 0x01, 0x02, 0x03, 0x11, 0x12,			//4
-//	0x13, 0x04, 0x14, 0x05, 0x0e, 0x0f,			//10
-//	0x1d, 0x1e, 0x1f, 0x10,
-//	0x23, 0x09,	0x07, 0x01,                     //AUDIO BLOCK
-//	0x83, 0x01, 0x00, 0x00,			            //22
-//	0x65, 0x03, 0x0c, 0x00, 0x10, 0x00,			//28
-///* 720x480@59.94  27000000/858/525 = 59.94 Hz */
-//	0x8c, 0x0a,				//34 - descriptor[0] - 0x0a8c - 27 Mhz
-//	0xd0,					//h - active 0x2d0 (720)
-//	0x8a,				det_work_enable	//h - blank 0x8a(138)
-//	0x20,
-//	0xe0,					//v - active 0x1e0 (480)
-//	0x2d,					//v - blank 0x2d (45)
-//	0x10,
-//	0x10, 0x3e, 0x96, 0x00, 0x09, 0x25, 0x21, 0x00, 0x00, 0x18,
-///* 1280x720@60  74250000/1650/750 = 60 Hz*/
-//	0x01, 0x1d,				//52 - 0x1d01 74.25MHz
-//	0x00,					//h - active (0x500)1280
-//	0x72,					//h - blank (0x172)370
-//	0x51,
-//	0xd0,					//v active 0x2d0(720)
-//	0x1e,					//v blank 0x1e(30)
-//	0x20,
-//	0x6e, 0x28, 0x55, 0x00, 0x09, 0x25, 0x21, 0x00, 0x00, 0x1e,
-///* 1280x720@50  74250000/1980/750 = 50 Hz  */
-//	0x01, 0x1d,				//70 - 0x1d01 74.25MHz
-//	0x00,					//h - active (0x500)1280
-//	0xbc,					//h - blank (0x2bc)700
-//	0x52,
-//	0xd0,					//v active 0x2d0 (720)
-//	0x1e,					//v blank 0x1e(30)
-//	0x20,
-//	0xb8, 0x28, 0x55, 0x40, 0x09, 0x25, 0x21, 0x00, 0x00, 0x1e,
-///* 720x576@50 27000000/864/625 = 50 Hz */
-//	0x8c, 0x0a,				//88 0x0a8c - 27 Mhz
-//	0xd0,					//h - active 0x2d0(720)
-//	0x90,					//h - blank 0x90(144)
-//	0x20,
-//	0x40,					//v active 0x240(576)
-//	0x31,					//v blanking 0x31(49)
-//	0x20,
-//	0x0c, 0x40, 0x55, 0x00, 0x09, 0x25, 0x21, 0x00, 0x00, 0x18,
-///* done */
-//	0x00, 0x00, 0x00, 0x00, 0x00,				//106
-//	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-//	0x00, 0x00,						//124
-//	0x00,							//126 - extension_flag
-//	0x73,							//127 - checksum
-//};
 static const u8 cHDMIEDID[256] = {
 	/* This is the edid that KDS should return */
 	0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,		//0 - header[8] - fixed pattern
@@ -404,8 +304,6 @@ static const u8 cHDMIEDID[256] = {
 
 static const struct reg_value tc358743_setting_YUV422_2lane_30fps_720P_1280_720_125MHz[] = {
   {0x0006, 0x00000040, 0x00000000, 2, 0},
-  {0x0014, 0x00000000, 0x00000000, 2, 0},
-  {0x0016, 0x000005ff, 0x00000000, 2, 0},
 // Program CSI Tx PLL
   {0x0020, 0x0000402d, 0x00000000, 2, 0},
   {0x0022, 0x00000213, 0x00000000, 2, 0},
@@ -429,13 +327,6 @@ static const struct reg_value tc358743_setting_YUV422_2lane_30fps_720P_1280_720_
   {0x0204, 0x00000001, 0x00000000, 4, 0},
   {0x0518, 0x00000001, 0x00000000, 4, 0},
   {0x0500, 0xa300be82, 0x00000000, 4, 0},
-// HDMI Interrupt Mask
-  {0x8502, 0x00000001, 0x00000000, 1, 0},
-  {0x8512, 0x000000fe, 0x00000000, 1, 0},
-  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
-  {0x8514, 0x00000000, 0x00000000, 1, 0},
-  {0x8515, 0x00000000, 0x00000000, 1, 0},
-  {0x8516, 0x00000000, 0x00000000, 1, 0},
 // HDMI Audio
   {0x8531, 0x00000001, 0x00000000, 1, 0},
   {0x8630, 0x000000b0, 0x00000000, 1, 0},
@@ -486,8 +377,6 @@ static const struct reg_value tc358743_setting_YUV422_2lane_30fps_720P_1280_720_
 
 static const struct reg_value tc358743_setting_YUV422_4lane_1024x768_60fps_125MHz[] = {
   {0x0006, 0x00000000, 0x00000000, 2, 0},
-  {0x0014, 0x0000ffff, 0x00000000, 2, 0},
-  {0x0016, 0x000005ff, 0x00000000, 2, 0},
 // Program CSI Tx PLL
   {0x0020, 0x0000405c, 0x00000000, 2, 0},	/* Input divide 5(4+1), Feedback divide 92(0x5c+1)*/
   {0x0022, 0x00000613, 0x00000000, 2, 0},
@@ -511,13 +400,6 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1024x768_60fps_125MH
   {0x0204, 0x00000001, 0x00000000, 4, 0},
   {0x0518, 0x00000001, 0x00000000, 4, 0},
   {0x0500, 0xa300be86, 0x00000000, 4, 0},
-// HDMI Interrupt Mask
-  {0x8502, 0x00000001, 0x00000000, 1, 0},
-  {0x8512, 0x000000fe, 0x00000000, 1, 0},
-  {0x8513, 0x00000000, 0x00000000, 1, 0},
-  {0x8514, 0x00000000, 0x00000000, 1, 0},
-  {0x8515, 0x00000000, 0x00000000, 1, 0},
-  {0x8516, 0x00000000, 0x00000000, 1, 0},
 // HDMI Audio
   {0x8531, 0x00000001, 0x00000000, 1, 0},
   {0x8630, 0x000000b0, 0x00000000, 1, 0},
@@ -563,13 +445,84 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1024x768_60fps_125MH
   {0x854a, 0x00000001, 0x00000000, 1, 0},
 // Output Control
   {0x0004, 0x00000cf7, 0x00000000, 2, 0},
+};
 
+static const struct reg_value tc358743_setting_YUV422_4lane_1024x768_75fps_300MHz[] = {
+  {0x0004, 0x00000084, 0x00000000, 2, 0},
+  {0x0006, 0x00000160, 0x00000000, 2, 0},
+// Program CSI Tx PLL
+  {0x0020, 0x000080c7, 0x00000000, 2, 0},
+  {0x0022, 0x00000213, 0x00000000, 2, 0},
+// CSI Tx PHY  (32-bit Registers)
+  {0x0140, 0x00000000, 0x00000000, 4, 0},
+  {0x0144, 0x00000000, 0x00000000, 4, 0},
+  {0x0148, 0x00000000, 0x00000000, 4, 0},
+  {0x014c, 0x00000000, 0x00000000, 4, 0},
+  {0x0150, 0x00000000, 0x00000000, 4, 0},
+// CSI Tx PPI  (32-bit Registers)
+  {0x0210, 0x00001e00, 0x00000000, 4, 0},
+  {0x0214, 0x00000003, 0x00000000, 4, 0},
+  {0x0218, 0x00001402, 0x00000000, 4, 0},
+  {0x021c, 0x00000000, 0x00000000, 4, 0},
+  {0x0220, 0x00000003, 0x00000000, 4, 0},
+  {0x0224, 0x00004a00, 0x00000000, 4, 0},
+  {0x0228, 0x00000008, 0x00000000, 4, 0},
+  {0x022c, 0x00000002, 0x00000000, 4, 0},
+  {0x0234, 0x0000001f, 0x00000000, 4, 0},
+  {0x0238, 0x00000001, 0x00000000, 4, 0},
+  {0x0204, 0x00000001, 0x00000000, 4, 0},
+  {0x0518, 0x00000001, 0x00000000, 4, 0},
+  {0x0500, 0xa30080a6, 0x00000000, 4, 0},
+// HDMI Audio
+  {0x8531, 0x00000001, 0x00000000, 1, 0},
+  {0x8630, 0x000000b0, 0x00000000, 1, 0},
+  {0x8631, 0x0000001e, 0x00000000, 1, 0},
+  {0x8632, 0x00000004, 0x00000000, 1, 0},
+  {0x8670, 0x00000001, 0x00000000, 1, 0},
+// HDMI PHY
+  {0x8532, 0x00000080, 0x00000000, 1, 0},
+  {0x8536, 0x00000040, 0x00000000, 1, 0},
+  {0x853f, 0x0000000a, 0x00000000, 1, 0},
+// HDMI System
+  {0x8545, 0x00000031, 0x00000000, 1, 0},
+  {0x8546, 0x0000002d, 0x00000000, 1, 0},
+// HDCP Setting
+  {0x85d1, 0x00000001, 0x00000000, 1, 0},
+  {0x8560, 0x00000024, 0x00000000, 1, 0},
+  {0x8563, 0x00000011, 0x00000000, 1, 0},
+  {0x8564, 0x0000000f, 0x00000000, 1, 0},
+// RGB --> YUV Conversion
+  {0x8571, 0x00000002, 0x00000000, 1, 0},
+  {0x8573, 0x000000c1, 0x00000000, 1, 0},
+  {0x8574, 0x00000008, 0x00000000, 1, 0},
+  {0x8576, 0x00000060, 0x00000000, 1, 0},
+// HDMI Audio In Setting
+  {0x8600, 0x00000000, 0x00000000, 1, 0},
+  {0x8602, 0x000000f3, 0x00000000, 1, 0},
+  {0x8603, 0x00000002, 0x00000000, 1, 0},
+  {0x8604, 0x0000000c, 0x00000000, 1, 0},
+  {0x8606, 0x00000005, 0x00000000, 1, 0},
+  {0x8607, 0x00000000, 0x00000000, 1, 0},
+  {0x8620, 0x00000022, 0x00000000, 1, 0},
+  {0x8640, 0x00000001, 0x00000000, 1, 0},
+  {0x8641, 0x00000065, 0x00000000, 1, 0},
+  {0x8642, 0x00000007, 0x00000000, 1, 0},
+  {0x8652, 0x00000002, 0x00000000, 1, 0},
+  {0x8665, 0x00000010, 0x00000000, 1, 0},
+// InfoFrame Extraction
+  {0x8709, 0x000000ff, 0x00000000, 1, 0},
+  {0x870b, 0x0000002c, 0x00000000, 1, 0},
+  {0x870c, 0x00000053, 0x00000000, 1, 0},
+  {0x870d, 0x000000ff, 0x00000000, 1, 0},
+  {0x870e, 0x00000030, 0x00000000, 1, 0},
+  {0x9007, 0x00000010, 0x00000000, 1, 0},
+  {0x854a, 0x00000001, 0x00000000, 1, 0},
+// Output Control
+  {0x0004, 0x00000cf7, 0x00000000, 2, 0},
 };
 
 static const struct reg_value tc358743_setting_YUV422_4lane_720P_60fps_1280_720_133Mhz[] = {
   {0x0006, 0x00000000, 0x00000000, 2, 0},
-  {0x0014, 0x0000ffff, 0x00000000, 2, 0},
-  {0x0016, 0x000005ff, 0x00000000, 2, 0},
 // Program CSI Tx PLL
   {0x0020, 0x00004062, 0x00000000, 2, 0},
   {0x0022, 0x00000613, 0x00000000, 2, 0},
@@ -593,13 +546,6 @@ static const struct reg_value tc358743_setting_YUV422_4lane_720P_60fps_1280_720_
   {0x0204, 0x00000001, 0x00000000, 4, 0},
   {0x0518, 0x00000001, 0x00000000, 4, 0},
   {0x0500, 0xa300be86, 0x00000000, 4, 0},
-// HDMI Interrupt Mask
-  {0x8502, 0x00000001, 0x00000000, 1, 0},
-  {0x8512, 0x000000fe, 0x00000000, 1, 0},
-  {0x8513, 0x00000000, 0x00000000, 1, 0},
-  {0x8514, 0x00000000, 0x00000000, 1, 0},
-  {0x8515, 0x00000000, 0x00000000, 1, 0},
-  {0x8516, 0x00000000, 0x00000000, 1, 0},
 // HDMI Audio
   {0x8531, 0x00000001, 0x00000000, 1, 0},
   {0x8630, 0x000000b0, 0x00000000, 1, 0},
@@ -1069,12 +1015,11 @@ static const struct reg_value tc358743_setting_YUV422_2lane_color_bar_640_480_10
   {0x7080, 0x00000083, 0x00000000, 2, 0},
 };
 
+//480p RGB2YUV442
 static const struct reg_value tc358743_setting_YUV422_2lane_60fps_640_480_125Mhz[] = {
   {0x0006, 0x00000040, 0x00000000, 2, 0},
 //  {0x000a, 0x000005a0, 0x00000000, 2, 0},
 //  {0x0010, 0x0000001e, 0x00000000, 2, 0},
-  {0x0014, 0x00000000, 0x00000000, 2, 0},
-  {0x0016, 0x000005ff, 0x00000000, 2, 0},
 // Program CSI Tx PLL
   {0x0020, 0x0000405c, 0x00000000, 2, 0},
   {0x0022, 0x00000613, 0x00000000, 2, 0},
@@ -1098,13 +1043,6 @@ static const struct reg_value tc358743_setting_YUV422_2lane_60fps_640_480_125Mhz
   {0x0204, 0x00000001, 0x00000000, 4, 0},
   {0x0518, 0x00000001, 0x00000000, 4, 0},
   {0x0500, 0xA30080A2, 0x00000000, 4, 0},
-// HDMI Interrupt Mask
-  {0x8502, 0x00000001, 0x00000000, 1, 0},
-  {0x8512, 0x000000fe, 0x00000000, 1, 0},
-  {0x8513, 0x00000000, 0x00000000, 1, 0},
-  {0x8514, 0x00000000, 0x00000000, 1, 0},
-  {0x8515, 0x00000000, 0x00000000, 1, 0},
-  {0x8516, 0x00000000, 0x00000000, 1, 0},
 // HDMI Audio
   {0x8531, 0x00000001, 0x00000000, 1, 0},
   {0x8630, 0x000000b0, 0x00000000, 1, 0},
@@ -1151,97 +1089,13 @@ static const struct reg_value tc358743_setting_YUV422_2lane_60fps_640_480_125Mhz
   {0x0004, 0x00000cf7, 0x00000000, 2, 0},
   };
 
+//480p RGB2YUV442
 static const struct reg_value tc358743_setting_YUV422_2lane_60fps_720_480_125Mhz[] = {
-		  {0x0006, 0x000000be, 0x00000000, 2, 0},
-		  {0x000a, 0x000005a0, 0x00000000, 2, 0},
-		//  {0x0010, 0x0000001e, 0x00000000, 2, 0},
-		  {0x0014, 0x00000000, 0x00000000, 2, 0},
-		  {0x0016, 0x000005ff, 0x00000000, 2, 0},
-		// Program CSI Tx PLL
-		  {0x0020, 0x00003063, 0x00000000, 2, 0},
-		  {0x0022, 0x00000613, 0x00000000, 2, 0},
-		// CSI Tx PHY  (32-bit Registers)
-		  {0x0140, 0x00000000, 0x00000000, 4, 0},
-		  {0x0144, 0x00000000, 0x00000000, 4, 0},
-		  {0x0148, 0x00000000, 0x00000000, 4, 0},
-		  {0x014c, 0x00000000, 0x00000000, 4, 0},
-		  {0x0150, 0x00000000, 0x00000000, 4, 0},
-		// CSI Tx PPI  (32-bit Registers)
-		  {0x0210, 0x00000bb8, 0x00000000, 4, 0},
-		  {0x0214, 0x00000002, 0x00000000, 4, 0},
-		  {0x0218, 0x00000f02, 0x00000000, 4, 0},
-		  {0x021c, 0x00000000, 0x00000000, 4, 0},
-		  {0x0220, 0x00000003, 0x00000000, 4, 0},
-		  {0x0224, 0x00004970, 0x00000000, 4, 0},
-		  {0x0228, 0x00000000, 0x00000000, 4, 0},
-		  {0x022c, 0x00000000, 0x00000000, 4, 0},
-		  {0x0234, 0x00000007, 0x00000000, 4, 0},
-		  {0x0238, 0x00000001, 0x00000000, 4, 0},
-		  {0x0204, 0x00000001, 0x00000000, 4, 0},
-		  {0x0518, 0x00000001, 0x00000000, 4, 0},
-		  {0x0500, 0xA3008082, 0x00000000, 4, 0},
-		// HDMI Interrupt Mask
-		  {0x8502, 0x00000001, 0x00000000, 1, 0},
-		  {0x8512, 0x000000fe, 0x00000000, 1, 0},
-		  {0x8513, 0x00000000, 0x00000000, 1, 0},
-		  {0x8514, 0x00000000, 0x00000000, 1, 0},
-		  {0x8515, 0x00000000, 0x00000000, 1, 0},
-		  {0x8516, 0x00000000, 0x00000000, 1, 0},
-		// HDMI Audio
-		  {0x8531, 0x00000001, 0x00000000, 1, 0},
-		  {0x8630, 0x000000b0, 0x00000000, 1, 0},
-		  {0x8631, 0x0000001e, 0x00000000, 1, 0},
-		  {0x8632, 0x00000004, 0x00000000, 1, 0},
-		  {0x8670, 0x00000001, 0x00000000, 1, 0},
-		// HDMI PHY
-		  {0x8532, 0x00000080, 0x00000000, 1, 0},
-		  {0x8536, 0x00000040, 0x00000000, 1, 0},
-		  {0x853f, 0x0000000a, 0x00000000, 1, 0},
-		// HDMI System
-		  {0x8545, 0x00000031, 0x00000000, 1, 0},
-		  {0x8546, 0x0000002d, 0x00000000, 1, 0},
-		// HDCP Setting
-		  {0x85d1, 0x00000001, 0x00000000, 1, 0},
-		  {0x8560, 0x00000024, 0x00000000, 1, 0},
-		  {0x8563, 0x00000011, 0x00000000, 1, 0},
-		  {0x8564, 0x0000000f, 0x00000000, 1, 0},
-		// RGB --> YUV Conversion
-		  {0x8573, 0x00000081, 0x00000000, 1, 0},
-		  {0x8571, 0x00000002, 0x00000000, 1, 0},
-		// HDMI Audio In Setting
-		  {0x8600, 0x00000000, 0x00000000, 1, 0},
-		  {0x8602, 0x000000f3, 0x00000000, 1, 0},
-		  {0x8603, 0x00000002, 0x00000000, 1, 0},
-		  {0x8604, 0x0000000c, 0x00000000, 1, 0},
-		  {0x8606, 0x00000005, 0x00000000, 1, 0},
-		  {0x8607, 0x00000000, 0x00000000, 1, 0},
-		  {0x8620, 0x00000022, 0x00000000, 1, 0},
-		  {0x8640, 0x00000001, 0x00000000, 1, 0},
-		  {0x8641, 0x00000065, 0x00000000, 1, 0},
-		  {0x8642, 0x00000007, 0x00000000, 1, 0},
-		  {0x8652, 0x00000002, 0x00000000, 1, 0},
-		  {0x8665, 0x00000010, 0x00000000, 1, 0},
-		// InfoFrame Extraction
-		  {0x8709, 0x000000ff, 0x00000000, 1, 0},
-		  {0x870b, 0x0000002c, 0x00000000, 1, 0},
-		  {0x870c, 0x00000053, 0x00000000, 1, 0},
-		  {0x870d, 0x00000001, 0x00000000, 1, 0},
-		  {0x870e, 0x00000030, 0x00000000, 1, 0},
-		  {0x9007, 0x00000010, 0x00000000, 1, 0},
-		  {0x854a, 0x00000001, 0x00000000, 1, 0},
-		// Output Control
-		  {0x0004, 0x00000cd7, 0x00000000, 2, 0},
-		  };
-
-
-static const struct reg_value tc358743_setting_YUV422_4lane_60fps_2880_480_216Mhz[] = {
-  {0x0006, 0x0000000a, 0x00000000, 2, 0},
-//  {0x000a, 0x000005a0, 0x00000000, 2, 0},
+  {0x0006, 0x00000040, 0x00000000, 2, 0},
+  {0x000a, 0x000005a0, 0x00000000, 2, 0},
 //  {0x0010, 0x0000001e, 0x00000000, 2, 0},
-  {0x0014, 0x00000000, 0x00000000, 2, 0},
-  {0x0016, 0x000005ff, 0x00000000, 2, 0},
 // Program CSI Tx PLL
-  {0x0020, 0x0000307f, 0x00000000, 2, 0},
+  {0x0020, 0x0000405b, 0x00000000, 2, 0},
   {0x0022, 0x00000613, 0x00000000, 2, 0},
 // CSI Tx PHY  (32-bit Registers)
   {0x0140, 0x00000000, 0x00000000, 4, 0},
@@ -1250,26 +1104,19 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_2880_480_216Mh
   {0x014c, 0x00000000, 0x00000000, 4, 0},
   {0x0150, 0x00000000, 0x00000000, 4, 0},
 // CSI Tx PPI  (32-bit Registers)
-  {0x0210, 0x00000bb8, 0x00000000, 4, 0},
-  {0x0214, 0x00000002, 0x00000000, 4, 0},
-  {0x0218, 0x00000f02, 0x00000000, 4, 0},
+  {0x0210, 0x00000d00, 0x00000000, 4, 0},
+  {0x0214, 0x00000001, 0x00000000, 4, 0},
+  {0x0218, 0x00000701, 0x00000000, 4, 0},
   {0x021c, 0x00000000, 0x00000000, 4, 0},
-  {0x0220, 0x00000002, 0x00000000, 4, 0},
-  {0x0224, 0x00004970, 0x00000000, 4, 0},
-  {0x0228, 0x00000000, 0x00000000, 4, 0},
-  {0x022c, 0x00000001, 0x00000000, 4, 0},
+  {0x0220, 0x00000001, 0x00000000, 4, 0},
+  {0x0224, 0x00004000, 0x00000000, 4, 0},
+  {0x0228, 0x00000005, 0x00000000, 4, 0},
+  {0x022c, 0x00000000, 0x00000000, 4, 0},
   {0x0234, 0x0000001f, 0x00000000, 4, 0},
   {0x0238, 0x00000001, 0x00000000, 4, 0},
   {0x0204, 0x00000001, 0x00000000, 4, 0},
   {0x0518, 0x00000001, 0x00000000, 4, 0},
-  {0x0500, 0xA3008086, 0x00000000, 4, 0},
-// HDMI Interrupt Mask
-  {0x8502, 0x00000001, 0x00000000, 1, 0},
-  {0x8512, 0x000000fe, 0x00000000, 1, 0},
-  {0x8513, 0x00000000, 0x00000000, 1, 0},
-  {0x8514, 0x00000000, 0x00000000, 1, 0},
-  {0x8515, 0x00000000, 0x00000000, 1, 0},
-  {0x8516, 0x00000000, 0x00000000, 1, 0},
+  {0x0500, 0xA30080A2, 0x00000000, 4, 0},
 // HDMI Audio
   {0x8531, 0x00000001, 0x00000000, 1, 0},
   {0x8630, 0x000000b0, 0x00000000, 1, 0},
@@ -1313,7 +1160,7 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_2880_480_216Mh
   {0x9007, 0x00000010, 0x00000000, 1, 0},
   {0x854a, 0x00000001, 0x00000000, 1, 0},
 // Output Control
-  {0x0004, 0x00000cd7, 0x00000000, 2, 0},
+  {0x0004, 0x00000cf7, 0x00000000, 2, 0},
   };
 
 static const struct reg_value tc358743_setting_YUV422_2lane_60fps_800_600_80Mhz[] = {
@@ -1732,8 +1579,6 @@ static const struct reg_value tc358743_setting_YUV422_4lane_60fps_1440_900_213Mh
 static const struct reg_value tc358743_setting_YUV422_4lane_1080P_60fps_1920_1080_300MHz[] = {
   {0x0004, 0x00000084, 0x00000000, 2, 0},
   {0x0006, 0x00000000, 0x00000000, 2, 0},
-  {0x0014, 0x00000000, 0x00000000, 2, 0},
-  {0x0016, 0x000005ff, 0x00000000, 2, 0},
 // Program CSI Tx PLL
   {0x0020, 0x000080c7, 0x00000000, 2, 0},
   {0x0022, 0x00000213, 0x00000000, 2, 0},
@@ -1757,13 +1602,6 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1080P_60fps_1920_108
   {0x0204, 0x00000001, 0x00000000, 4, 0},
   {0x0518, 0x00000001, 0x00000000, 4, 0},
   {0x0500, 0xa30080a6, 0x00000000, 4, 0},
-// HDMI Interrupt Mask
-  {0x8502, 0x00000001, 0x00000000, 1, 0},
-  {0x8512, 0x000000fe, 0x00000000, 1, 0},
-  {0x8513, 0x00000000, 0x00000000, 1, 0},
-  {0x8514, 0x00000000, 0x00000000, 1, 0},
-  {0x8515, 0x00000000, 0x00000000, 1, 0},
-  {0x8516, 0x00000000, 0x00000000, 1, 0},
 // HDMI Audio
   {0x8531, 0x00000001, 0x00000000, 1, 0},
   {0x8630, 0x000000b0, 0x00000000, 1, 0},
@@ -1814,8 +1652,6 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1080P_60fps_1920_108
 static const struct reg_value tc358743_setting_YUV422_4lane_1080P_30fps_1920_1080_300MHz[] = {
   {0x0004, 0x00000084, 0x00000000, 2, 0},		//  Internal Generated output pattern,Do not send InfoFrame data out to CSI2,Audio output to CSI2-TX i/f,I2C address index increments on every data byte transfer, disable audio and video TX buffers
   {0x0006, 0x000001f8, 0x00000000, 2, 0},		// FIFO level = 1f8 = 504
-  {0x0014, 0x00000000, 0x00000000, 2, 0},		// Clear interrupt status bits
-  {0x0016, 0x000005ff, 0x00000000, 2, 0},		// Mask audio mute, CSI-TX, and the other interrups
 // Program CSI Tx PLL
   //{0x0020, 0x000080c7, 0x00000000, 2, 0},		// Input divider setting = 0x8 -> Division ratio = (PRD3..0) + 1 = 9, Feedback divider setting = 0xc7 -> Division ratio = (FBD8...0) + 1 = 200
   {0x0020, 0x000080c7, 0x00000000, 2, 0},		// Input divider setting = 0x8 -> Division ratio = (PRD3..0) + 1 = 9, Feedback divider setting = 0xc7 -> Division ratio = (FBD8...0) + 1 = 200
@@ -1840,13 +1676,6 @@ static const struct reg_value tc358743_setting_YUV422_4lane_1080P_30fps_1920_108
   {0x0204, 0x00000001, 0x00000000, 4, 0},		// PPI STARTCNTRL: start PPI function
   {0x0518, 0x00000001, 0x00000000, 4, 0},		// CSI_START: start
   {0x0500, 0xa30080a6, 0x00000000, 4, 0},		// CSI Configuration Register: set register 0x040C with data 0x80a6 (CSI MOde, Disables the HTX_TO timer, High-Speed data transfer is performed to Tx, DSCClk Stays in HS mode when Data Lane goes to LP, 4 Data Lanes,The EOT packet is automatically granted at the end of HS transfer then is transmitted)
-// HDMI Interrupt Mask
-  {0x8502, 0x00000001, 0x00000000, 1, 0},		// SYSTEM INTERRUPT: clear DDC power change detection interrupt
-  {0x8512, 0x000000fe, 0x00000000, 1, 0},		// SYS INTERRUPT MASK: DDC power change detection interrupt not masked
-  {0x8513, 0x00000000, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
-  {0x8514, 0x00000000, 0x00000000, 1, 0},		// PACKET INTERRUPT MASK: unmask all
-  {0x8515, 0x00000000, 0x00000000, 1, 0},		// CBIT INTERRUPT MASK: unmask all
-  {0x8516, 0x00000000, 0x00000000, 1, 0},		// AUDIO INTERRUPT MASK: unmask all
 // HDMI Audio
   {0x8531, 0x00000001, 0x00000000, 1, 0},		// PHY CONTROL0: 27MHz, DDC5V detection operation.
   {0x8630, 0x000000b0, 0x00000000, 1, 0},		// Audio FS Lock Detect Control: for 27MHz
@@ -2350,115 +2179,100 @@ static const struct v4l2_fmtdesc tc358743_formats[] = {
 };
 
 
-static const struct tc358743_mode_info tc358743_mode_info_data[2][tc358743_mode_MAX] = {
+static const struct tc358743_mode_info tc358743_mode_info_data[tc358743_max_fps][tc358743_mode_MAX] = {
 /* Color bar test settings */
-
-	[tc358743_60_fps][tc358743_mode_INIT0] =
-		{"1920x1080@60", tc358743_mode_1080P_1920_1080,  1920, 1080,
-		15, 0x0b, 4, 300,
-		tc358743_setting_YUV422_4lane_1080P_60fps_1920_1080_300MHz,
-		ARRAY_SIZE(tc358743_setting_YUV422_4lane_1080P_60fps_1920_1080_300MHz),
-		MIPI_DT_YUV422
-		},
-	[tc358743_30_fps][tc358743_mode_INIT0] =
-		{"1920x1080@30", tc358743_mode_1080P_1920_1080,  1920, 1080,
-		15, 0xa, 4, 300,
-		tc358743_setting_YUV422_4lane_1080P_30fps_1920_1080_300MHz,
-		ARRAY_SIZE(tc358743_setting_YUV422_4lane_1080P_30fps_1920_1080_300MHz),
-		MIPI_DT_YUV422
-		},
-	[1][tc358743_mode_INIT] =
+	[tc358743_30_fps][tc358743_mode_INIT] =
 		{"cb640x480-108MHz@30", tc358743_mode_INIT,  640, 480,
 		6, 1, 2, 108,
 		tc358743_setting_YUV422_2lane_color_bar_640_480_108MHz_cont,
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_color_bar_640_480_108MHz_cont),
 		MIPI_DT_YUV422
 		},
-	[0][tc358743_mode_INIT] =
+	[tc358743_60_fps][tc358743_mode_INIT] =
 		{"cb640x480-108MHz@60", tc358743_mode_INIT,  640, 480,
 		6, 1, 2, 108,
 		tc358743_setting_YUV422_2lane_color_bar_640_480_108MHz_cont,
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_color_bar_640_480_108MHz_cont),
 		MIPI_DT_YUV422
 		},
-	[1][tc358743_mode_INIT4] =
+	[tc358743_30_fps][tc358743_mode_INIT4] =
 		{"cb640x480-174Mhz@30", tc358743_mode_INIT4,  640, 480,
 		6, 1, 2, 174,
 		tc358743_setting_YUV422_2lane_color_bar_640_480_174MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_color_bar_640_480_174MHz),
 		MIPI_DT_YUV422
 		},
-	[0][tc358743_mode_INIT4] =
+	[tc358743_60_fps][tc358743_mode_INIT4] =
 		{"cb640x480-174MHz@60", tc358743_mode_INIT4,  640, 480,
 		6, 1, 2, 174,
 		tc358743_setting_YUV422_2lane_color_bar_640_480_174MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_color_bar_640_480_174MHz),
 		MIPI_DT_YUV422
 		},
-	[1][tc358743_mode_INIT3] =
+	[tc358743_30_fps][tc358743_mode_INIT3] =
 		{"cb1024x720-4lane@30", tc358743_mode_INIT3,  1024, 720,
 		6, 1, 4, 300,
 		tc358743_setting_YUV422_4lane_color_bar_1024_720_200MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_color_bar_1024_720_200MHz),
 		MIPI_DT_YUV422
 		},
-	[0][tc358743_mode_INIT3] =
+	[tc358743_60_fps][tc358743_mode_INIT3] =
 		{"cb1024x720-4lane@60", tc358743_mode_INIT3,  1024, 720,
 		6, 1, 4, 300,
 		tc358743_setting_YUV422_4lane_color_bar_1024_720_200MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_color_bar_1024_720_200MHz),
 		MIPI_DT_YUV422
 		},
-	[1][tc358743_mode_INIT1] =
+	[tc358743_30_fps][tc358743_mode_INIT1] =
 		{"cb1280x720-2lane@30", tc358743_mode_INIT1,  1280, 720,
 		12, 0, 2, 125,
 		tc358743_setting_YUV422_2lane_color_bar_1280_720_125MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_color_bar_1280_720_125MHz),
 		MIPI_DT_YUV422
 		},
-	[0][tc358743_mode_INIT1] =
+	[tc358743_60_fps][tc358743_mode_INIT1] =
 		{"cb1280x720-2lane@60", tc358743_mode_INIT1,  1280, 720,
 		12, 0, 2, 125,
 		tc358743_setting_YUV422_2lane_color_bar_1280_720_125MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_color_bar_1280_720_125MHz),
 		MIPI_DT_YUV422
 		},
-	[1][tc358743_mode_INIT2] =
+	[tc358743_30_fps][tc358743_mode_INIT2] =
 		{"cb1280x720-4lane-125MHz@30", tc358743_mode_INIT2,  1280, 720,
 		12, 0, 4, 125,
 		tc358743_setting_YUV422_4lane_color_bar_1280_720_125MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_color_bar_1280_720_125MHz),
 		MIPI_DT_YUV422
 		},
-	[0][tc358743_mode_INIT2] =
+	[tc358743_60_fps][tc358743_mode_INIT2] =
 		{"cb1280x720-4lane-125MHz@60", tc358743_mode_INIT2,  1280, 720,
 		12, 0, 4, 125,
 		tc358743_setting_YUV422_4lane_color_bar_1280_720_125MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_color_bar_1280_720_125MHz),
 		MIPI_DT_YUV422
 		},
-	[1][tc358743_mode_INIT5] =
+	[tc358743_30_fps][tc358743_mode_INIT5] =
 		{"cb1280x720-4lane-300MHz@30", tc358743_mode_INIT5,  1280, 720,
 		12, 0, 4, 300,
 		tc358743_setting_YUV422_4lane_color_bar_1280_720_300MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_color_bar_1280_720_300MHz),
 		MIPI_DT_YUV422
 		},
-	[0][tc358743_mode_INIT5] =
+	[tc358743_60_fps][tc358743_mode_INIT5] =
 		{"cb1280x720-4lane-300MHz@60", tc358743_mode_INIT5,  1280, 720,
 		12, 0, 4, 300,
 		tc358743_setting_YUV422_4lane_color_bar_1280_720_300MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_color_bar_1280_720_300MHz),
 		MIPI_DT_YUV422
 		},
-	[1][tc358743_mode_INIT6] =
+	[tc358743_30_fps][tc358743_mode_INIT6] =
 		{"cb1920x1023@30", tc358743_mode_INIT6,  1920, 1023,
 		15, 0, 4, 300,
 		tc358743_setting_YUV422_4lane_color_bar_1920_1023_300MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_color_bar_1920_1023_300MHz),
 		MIPI_DT_YUV422
 		},
-	[0][tc358743_mode_INIT6] =
+	[tc358743_60_fps][tc358743_mode_INIT6] =
 		{"cb1920x1023@60", tc358743_mode_INIT6,  1920, 1023,
 		15, 0, 4, 300,
 		tc358743_setting_YUV422_4lane_color_bar_1920_1023_300MHz,
@@ -2473,7 +2287,7 @@ static const struct tc358743_mode_info tc358743_mode_info_data[2][tc358743_mode_
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_60fps_640_480_125Mhz),
 		MIPI_DT_YUV422,
 		},
-	[1][tc358743_mode_480P_720_480] =
+	[tc358743_30_fps][tc358743_mode_480P_720_480] =
 		{"720x480@30", tc358743_mode_480P_720_480,  720, 480,
 		6, (0x02)<<8|(0x00), 2, 125,
 		tc358743_setting_YUV422_2lane_60fps_720_480_125Mhz,
@@ -2494,14 +2308,21 @@ static const struct tc358743_mode_info tc358743_mode_info_data[2][tc358743_mode_
 		ARRAY_SIZE(tc358743_setting_YUV422_4lane_1024x768_60fps_125MHz),
 		MIPI_DT_YUV422
 		},
-	[1][tc358743_mode_720P_1280_720] =
+	[tc358743_75_fps][tc358743_mode_1024x768] =
+		{"1024x768@75", tc358743_mode_1024x768,  1024, 768,
+		16, 75, 4, 125,
+		tc358743_setting_YUV422_4lane_1024x768_75fps_300MHz,
+		ARRAY_SIZE(tc358743_setting_YUV422_4lane_1024x768_75fps_300MHz),
+		MIPI_DT_YUV422
+		},
+	[tc358743_30_fps][tc358743_mode_720P_1280_720] =
 		{"1280x720-2lane@30", tc358743_mode_720P_1280_720,  1280, 720,
 		12, (0x3e)<<8|(0x3c), 2, 125,
 		tc358743_setting_YUV422_2lane_30fps_720P_1280_720_125MHz,
 		ARRAY_SIZE(tc358743_setting_YUV422_2lane_30fps_720P_1280_720_125MHz),
 		MIPI_DT_YUV422,
 		},
-	[0][tc358743_mode_720P_1280_720] =
+	[tc358743_60_fps][tc358743_mode_720P_1280_720] =
 		{"1280x720-2lane@60", tc358743_mode_720P_1280_720,  1280, 720,
 		12, (0x3e)<<8|(0x3c), 2, 125,
 		tc358743_setting_YUV422_2lane_30fps_720P_1280_720_125MHz,
@@ -2554,7 +2375,7 @@ static const struct tc358743_mode_info tc358743_mode_info_data[2][tc358743_mode_
 
 		MIPI_DT_YUV422,
 		},
-
+#if 0
 	[tc358743_60_fps][tc358743_mode_2880x480] =
 		{"2880x480@60", tc358743_mode_2880x480,  2880, 480,
 		10, 0x3c, 4, 216,
@@ -2563,6 +2384,7 @@ static const struct tc358743_mode_info tc358743_mode_info_data[2][tc358743_mode_
 
 		MIPI_DT_YUV422,
 		},
+#endif
 
 	[tc358743_60_fps][tc358743_mode_800x600] =
 		{"800x600@60", tc358743_mode_800x600,  800, 600,
@@ -2688,10 +2510,6 @@ int get_reg_size(u16 reg, int len)
 	const struct _reg_size *p = tc358743_read_reg_size;
 	int size;
 
-#if 0	//later #ifndef DEBUG
-	if (len)
-		return len;
-#endif
 	while (p->size) {
 		if ((p->startaddr <= reg) && (reg <= p->endaddr)) {
 			size = p->size;
@@ -2830,18 +2648,88 @@ static s32 tc358743_write_reg(struct sensor_data *sensor, u16 reg, u32 val, int 
 	return 0;
 }
 
-static void tc358743_software_reset(struct sensor_data *sensor)
+static int tc_fps_to_index(int fps)
+{
+	int ret;
+
+	switch (fps) {
+	case 28 ... 32:
+		ret = tc358743_30_fps;
+		break;
+	case 58 ... 62:
+		ret = tc358743_60_fps;
+		break;
+	case 73 ... 77:
+		ret = tc358743_75_fps;
+		break;
+	default:
+		ret = -1;
+	}
+
+	return ret;
+}
+
+static int tc_get_fps(struct sensor_data *sensor)
+{
+	u32 frame_interval;
+	int fps = 0;
+
+	frame_interval = (tc358743_read_reg_val(sensor, FV_CNT_HI) & 0x3) << 8;
+	frame_interval += tc358743_read_reg_val(sensor, FV_CNT_LO);
+
+	if (frame_interval > 0)
+		fps = DIV_ROUND_CLOSEST(10000, frame_interval);
+
+	pr_debug("%s: frame_interval = %d*100us, fps = %d\n",
+		 __func__, frame_interval, fps);
+
+	return fps;
+}
+
+static void clear_interrupts(struct sensor_data *sd)
+{
+	int i;
+
+	/* clear interrupt status registers */
+	for (i = SYS_INT; i <= KEY_INT; i++)
+		tc358743_write_reg(sd, i, 0xff, 1);
+
+	tc358743_write_reg(sd, INTSTATUS, 0xffff, 2);
+}
+
+static void enable_interrupts(struct sensor_data *sd)
+{
+	clear_interrupts(sd);
+
+	/* Enable all interrupts */
+	tc358743_write_reg(sd, SYS_INTM, ~(MASK_M_DDC | MASK_M_DVI_DET |
+					   MASK_M_HDMI_DET) & 0xff, 1);
+	tc358743_write_reg(sd, CLK_INTM, ~MASK_M_IN_DE_CHG, 1);
+	tc358743_write_reg(sd, CBIT_INTM, ~(MASK_M_CBIT_FS | MASK_M_AF_LOCK |
+					    MASK_M_AF_UNLOCK) & 0xff, 1);
+	tc358743_write_reg(sd, AUDIO_INTM, ~MASK_M_BUFINIT_END, 1);
+	tc358743_write_reg(sd, MISC_INTM, ~MASK_M_SYNC_CHG, 1);
+	tc358743_write_reg(sd, INTMASK, ~(MASK_HDMI_MSK |
+					  MASK_CSI_MSK) & 0xffff, 2);
+}
+
+static void tc358743_software_reset(struct sensor_data *sensor, u16 mask)
 {
 	int freq = sensor->mclk / 10000;
+
+	pr_debug("%s: mask: %04x freq: %d\n", __func__, mask, freq);
+
 	tc358743_write_reg(sensor, 0x7080, 0, 2);
-	tc358743_write_reg(sensor, 0x0002, 0x0f00, 2);
+
+	tc358743_write_reg(sensor, SYSCTL, mask, 2);
 	msleep(100);
-	tc358743_write_reg(sensor, 0x0002, 0x0000, 2);
-	msleep(1000);
-	tc358743_write_reg(sensor, 0x0004, 0x0004, 2);	/* autoinc */
-	pr_debug("%s:freq=%d\n", __func__, freq);
-	tc358743_write_reg(sensor, 0x8540, freq, 1);
-	tc358743_write_reg(sensor, 0x8541, freq >> 8, 1);
+	tc358743_write_reg(sensor, SYSCTL, 0x0000, 2);
+	msleep(100);
+
+	tc358743_write_reg(sensor, CONFCTL, MASK_AUTOINDEX, 2);
+
+	tc358743_write_reg(sensor, SYS_FREQ0, freq, 1);
+	tc358743_write_reg(sensor, SYS_FREQ1, freq >> 8, 1);
 }
 
 static void tc358743_enable_edid(struct sensor_data *sensor)
@@ -2943,13 +2831,13 @@ static int tc358743_toggle_hpd(struct sensor_data *sensor, int active)
 {
 	int ret = 0;
 	if (active) {
-		ret += tc358743_write_reg(sensor, 0x8544, 0x00, 1);
+		ret += tc358743_write_reg(sensor, HPD_CTL, 0x00, 1);
 		mdelay(500);
-		ret += tc358743_write_reg(sensor, 0x8544, 0x10, 1);
+		ret += tc358743_write_reg(sensor, HPD_CTL, MASK_HPD_CTL0, 1);
 	} else {
-		ret += tc358743_write_reg(sensor, 0x8544, 0x10, 1);
+		ret += tc358743_write_reg(sensor, HPD_CTL, MASK_HPD_CTL0, 1);
 		mdelay(500);
-		ret += tc358743_write_reg(sensor, 0x8544, 0x00, 1);
+		ret += tc358743_write_reg(sensor, HPD_CTL, 0x00, 1);
 	}
 	return ret;
 }
@@ -3183,13 +3071,16 @@ static int tc358743_init_mode(struct tc_data *td,
 
 	pr_debug("%s rate: %d mode: %d\n", __func__, frame_rate, mode);
 	if ((mode >= tc358743_mode_MAX || mode < 0)
-		&& (mode != tc358743_mode_INIT0)) {
+		&& (mode != tc358743_mode_INIT)) {
 		pr_debug("%s Wrong tc358743 mode detected! %d. Set mode 0\n", __func__, mode);
 		mode = 0;
 	}
-	/* initial mipi dphy */
+
 	tc358743_toggle_hpd(sensor, 0);
-	tc358743_software_reset(sensor);
+	if (mode == tc358743_mode_INIT)
+		tc358743_software_reset(sensor, MASK_CTXRST | MASK_HDMIRST);
+	else
+		tc358743_software_reset(sensor, MASK_CTXRST);
 
 	mipi_csi2_info = mipi_csi2_get_info();
 	pr_debug("%s rate: %d mode: %d, info %p\n", __func__, frame_rate, mode, mipi_csi2_info);
@@ -3198,26 +3089,24 @@ static int tc358743_init_mode(struct tc_data *td,
 		pr_err("Fail to get mipi_csi2_info!\n");
 		return -1;
 	}
-	retval = mipi_reset(mipi_csi2_info, frame_rate, tc358743_mode_INIT0);
+
+	retval = mipi_reset(mipi_csi2_info, frame_rate, mode);
 	if (retval)
 		return retval;
-	retval = set_frame_rate_mode(td, frame_rate, tc358743_mode_INIT0);
+
+	/* A second software seems necessary here */
+	tc358743_software_reset(sensor, MASK_CTXRST);
+
+	retval = set_frame_rate_mode(td, frame_rate, mode);
 	if (retval)
 		return retval;
+
 	retval = mipi_wait(mipi_csi2_info);
 
-	if (mode != tc358743_mode_INIT0) {
-		tc358743_software_reset(sensor);
-		retval = mipi_reset(mipi_csi2_info, frame_rate, mode);
-		if (retval)
-			return retval;
-		retval = set_frame_rate_mode(td, frame_rate, mode);
-		if (retval)
-			return retval;
-		retval = mipi_wait(mipi_csi2_info);
-	}
+	enable_interrupts(sensor);
 	if (td->hpd_active)
 		tc358743_toggle_hpd(sensor, td->hpd_active);
+
 	return retval;
 }
 
@@ -3229,10 +3118,11 @@ static int tc358743_minit(struct tc_data *td)
 	u32 tgt_fps = sensor->streamcap.timeperframe.denominator /
 			sensor->streamcap.timeperframe.numerator;
 
-	if (tgt_fps == 60)
-		frame_rate = tc358743_60_fps;
-	else if (tgt_fps == 30)
-		frame_rate = tc358743_30_fps;
+	frame_rate = tc_fps_to_index(tgt_fps);
+	if (frame_rate < 0) {
+		pr_err("%s: unsupported fps: %d\n", __func__, tgt_fps);
+		return -1;
+	}
 
 	pr_debug("%s: capture mode: %d fps: %d\n", __func__,
 		sensor->streamcap.capturemode, tgt_fps);
@@ -3248,7 +3138,6 @@ static int tc358743_reset(struct tc_data *td)
 	int loop = 0;
 	int ret;
 
-	det_work_enable(td, 0);
 	for (;;) {
 		pr_debug("%s: RESET\n", __func__);
 		power_control(td, 0);
@@ -3264,7 +3153,7 @@ static int tc358743_reset(struct tc_data *td)
 			break;
 		}
 	}
-	det_work_enable(td, 1);
+
 	return ret;
 }
 
@@ -3378,7 +3267,7 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 
 	pr_debug("%s\n", __func__);
 	mutex_lock(&td->access_lock);
-	det_work_enable(td, 0);
+
 	/* Make sure power on */
 	power_control(td, 1);
 
@@ -3407,11 +3296,8 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 		tgt_fps = timeperframe->denominator /
 			  timeperframe->numerator;
 
-		if (tgt_fps == 60)
-			frame_rate = tc358743_60_fps;
-		else if (tgt_fps == 30)
-			frame_rate = tc358743_30_fps;
-		else {
+		frame_rate = tc_fps_to_index(tgt_fps);
+		if (frame_rate < 0) {
 			pr_err(" The camera frame rate is not supported!\n");
 			ret = -EINVAL;
 			break;
@@ -3426,10 +3312,7 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 		tgt_fps = sensor->streamcap.timeperframe.denominator /
 			  sensor->streamcap.timeperframe.numerator;
 
-		if (tgt_fps == 60)
-			frame_rate_now = tc358743_60_fps;
-		else if (tgt_fps == 30)
-			frame_rate_now = tc358743_30_fps;
+		frame_rate_now = tc_fps_to_index(tgt_fps);
 
 		mode = td->mode;
 		if (IS_COLORBAR(mode)) {
@@ -3437,7 +3320,7 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 		} else {
 			a->parm.capture.capturemode = mode;
 			frame_rate = td->fps;
-			timeperframe->denominator = (frame_rate == tc358743_60_fps) ? 60 : 30;
+			timeperframe->denominator = tc358743_fps_list[frame_rate];
 			timeperframe->numerator = 1;
 		}
 
@@ -3445,7 +3328,7 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 		   sensor->streamcap.capturemode != mode ||
 		   sensor->streamcap.extendedmode != (u32)a->parm.capture.extendedmode) {
 
-			if (mode != tc358743_mode_INIT0) {
+			if (mode != tc358743_mode_INIT) {
 				sensor->streamcap.capturemode = mode;
 				sensor->streamcap.timeperframe = *timeperframe;
 				sensor->streamcap.extendedmode =
@@ -3482,7 +3365,6 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 		break;
 	}
 
-	det_work_enable(td, 1);
 	mutex_unlock(&td->access_lock);
 	return ret;
 }
@@ -3691,12 +3573,11 @@ static int ioctl_try_fmt_cap(struct v4l2_int_device *s,
 	tgt_fps = sensor->streamcap.timeperframe.denominator /
 		  sensor->streamcap.timeperframe.numerator;
 
-	if (tgt_fps == 60) {
-		frame_rate = tc358743_60_fps;
-	} else if (tgt_fps == 30) {
-		frame_rate = tc358743_30_fps;
-	} else {
-		pr_debug("%s: %d fps (%d,%d) is not supported\n", __func__, tgt_fps, sensor->streamcap.timeperframe.denominator,sensor->streamcap.timeperframe.numerator);
+	frame_rate = tc_fps_to_index(tgt_fps);
+	if (frame_rate < 0) {
+		pr_debug("%s: %d fps (%d,%d) is not supported\n", __func__,
+			 tgt_fps, sensor->streamcap.timeperframe.denominator,
+			 sensor->streamcap.timeperframe.numerator);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -3857,72 +3738,16 @@ static struct v4l2_int_device tc358743_int_device = {
 
 
 #ifdef CONFIG_TC358743_AUDIO
-
-#define NUM_OF_SSI_REG (sizeof(struct ccsr_ssi) / sizeof(__be32))
-
+/* FIXME, we can get a regmap pointer ourselves, no need to steal */
 /**
  * fsl_ssi_private: per-SSI private data
  *
  * copied from sound/soc/fsl/fsl_ssi.c
- *
- * @ssi: pointer to the SSI's registers
- * @ssi_phys: physical address of the SSI registers
- * @irq: IRQ of this SSI
- * @playback: the number of playback streams opened
- * @capture: the number of capture streams opened
- * @cpu_dai: the CPU DAI for this device
- * @dev_attr: the sysfs device attribute structure
- * @stats: SSI statistics
- * @name: name for this device
  */
+
 struct fsl_ssi_private {
-	struct ccsr_ssi __iomem *ssi;
-	dma_addr_t ssi_phys;
-	unsigned int irq;
-	unsigned int fifo_depth;
-	struct snd_soc_dai_driver cpu_dai_drv;
-	struct device_attribute dev_attr;
-	struct platform_device *pdev;
-
-	bool new_binding;
-	bool ssi_on_imx;
-	bool use_dual_fifo;
-	bool baudclk_locked;
-	u8 i2s_mode;
-	spinlock_t baudclk_lock;
-	struct clk *coreclk;
-	struct clk *clk;
-	unsigned int bitclk_freq;
-	unsigned int baudclk_streams;
-	struct snd_dmaengine_dai_dma_data dma_params_tx;
-	struct snd_dmaengine_dai_dma_data dma_params_rx;
-
-	struct {
-		unsigned int rfrc;
-		unsigned int tfrc;
-		unsigned int cmdau;
-		unsigned int cmddu;
-		unsigned int rxt;
-		unsigned int rdr1;
-		unsigned int rdr0;
-		unsigned int tde1;
-		unsigned int tde0;
-		unsigned int roe1;
-		unsigned int roe0;
-		unsigned int tue1;
-		unsigned int tue0;
-		unsigned int tfs;
-		unsigned int rfs;
-		unsigned int tls;
-		unsigned int rls;
-		unsigned int rff1;
-		unsigned int rff0;
-		unsigned int tfe1;
-		unsigned int tfe0;
-	} stats;
-
-	u32 regcache[NUM_OF_SSI_REG];
-	char name[1];
+	struct regmap *regs;
+	/* more that I don't need to know about */
 };
 
 /* Audio setup */
@@ -3965,33 +3790,19 @@ static int imxpac_tc358743_hw_params(struct snd_pcm_substream *substream,
 		pr_err("can't set CPU system clock IMX_SSP_SYS_CLK\n");
 		return ret;
 	}
-#if 0
-// clear SSI_SRCR_RXBIT0 and SSI_SRCR_RSHFD in order to push Right-justified MSB data from
+#if 1
+	// clear SSI_SRCR_RXBIT0 and SSI_SRCR_RSHFD in order to push Right-justified MSB data from
 	{
 		struct fsl_ssi_private *ssi_private = snd_soc_dai_get_drvdata(cpu_dai);
-		struct ccsr_ssi __iomem *ssi = ssi_private->ssi;
-		u32 reg = 0;
-		//ssi=0x2028000;
-		pr_err("%s: SSI: %08x\n", __func__, (unsigned int)ssi);
-		pr_err("%s: SSI_STCCR: %08x\n", __func__, (unsigned int)&ssi->stccr);
-		pr_err("%s: SSI_SRCCR: %08x\n", __func__, (unsigned int)&ssi->srccr);
-		reg = readl(&ssi->stccr);
-		pr_err("%s: SSI_STCCR before: %p\n", __func__, (void *)reg);
-		reg &= ~CCSR_SSI_SxCCR_WL_MASK;
-		reg |= CCSR_SSI_SxCCR_WL(16);
-		writel(reg, &ssi->stccr);
-		pr_err("%s: SSI_STCCR after:  %p\n", __func__, (void *)reg);
+		struct regmap *regs = ssi_private->regs;
 
-		reg = readl(&ssi->srccr);
-		pr_err("%s: SSI_SRCCR before: %p\n", __func__, (void *)reg);
-		reg &= ~CCSR_SSI_SxCCR_WL_MASK;
-		reg |= CCSR_SSI_SxCCR_WL(16);
-		writel(reg, &ssi->srccr);
-		pr_err("%s: SSI_SRCCR after:  %p\n", __func__, (void *)reg);
+		regmap_update_bits(regs, CCSR_SSI_STCCR, CCSR_SSI_SxCCR_WL_MASK, CCSR_SSI_SxCCR_WL(16));
+		regmap_update_bits(regs, CCSR_SSI_SRCCR, CCSR_SSI_SxCCR_WL_MASK, CCSR_SSI_SxCCR_WL(16));
 	}
 #endif
 	return 0;
 }
+
 
 static struct snd_soc_ops imxpac_tc358743_snd_ops = {
 	.hw_params	= imxpac_tc358743_hw_params,
@@ -4180,8 +3991,8 @@ static int imx_tc358743_remove(struct platform_device *pdev)
 {
 	/* Audio breakdown */
 	snd_soc_unregister_card(&imxpac_tc358743);
-	snd_soc_unregister_codec(&pdev->dev);
 
+	snd_soc_unregister_codec(&pdev->dev);
 	return 0;
 }
 
@@ -4323,33 +4134,6 @@ struct tc_mode_list {
 	enum tc358743_mode mode;
 };
 
-static const struct tc_mode_list tc358743_mode_list[] =
-{
-	{"None", 0},								/* 0 */
-	{"VGA", tc358743_mode_480P_640_480},		/* 1 */
-	{"240p/480i", 0},							/* 2 */
-	{"288p/576i", 0},							/* 3 */
-	{"W240p/480i", 0},							/* 4 */
-	{"W288p/576i", 0},							/* 5 */
-	{"480p", tc358743_mode_480P_720_480},		/* 6 */
-	{"576p", tc358743_mode_720x576},			/* 7 */
-	{"W480p", tc358743_mode_1440x480},			/* 8 */
-	{"W576p", 0},								/* 9 */
-	{"WW480p", tc358743_mode_2880x480},			/* 10 */
-	{"WW576p", 0},								/* 11 */
-	{"720p", tc358743_mode_720P_60_1280_720},	/* 12 */
-	{"1035i", 0},								/* 13 */
-	{"1080i", 0},								/* 14 */
-	{"1080p", tc358743_mode_1080P_1920_1080},	/* 15 */
-};
-
-static char tc358743_fps_list[tc358743_max_fps+1] =
-{
-[tc358743_60_fps] = 60,
-[tc358743_30_fps] = 30,
-[tc358743_max_fps] = 0
-};
-
 static int tc358743_audio_list[16] =
 {
 	44100,
@@ -4382,16 +4166,303 @@ static void report_netlink(struct tc_data *td)
 			tc358743_mode_info_data[td->fps][td->mode].name,
 			tc358743_fps_list[td->fps], tc358743_audio_list[td->audio]);
 	kobject_uevent_env(&(sensor->i2c_client->dev.kobj), KOBJ_CHANGE, envp);
-	td->det_work_timeout = DET_WORK_TIMEOUT_DEFAULT;
-	pr_debug("%s: HDMI RX (%d) mode: %s fps: %d (bounce:%d, det_to:%d) audio: %d\n",
+	pr_debug("%s: HDMI RX (%d) mode: %s fps: %d audio: %d\n",
 		__func__, td->mode,
-		tc358743_mode_info_data[td->fps][td->mode].name,
-		(td->fps==tc358743_60_fps)?60:30,
-		td->bounce,
-		td->det_work_timeout,
+		tc358743_mode_info_data[td->fps][td->mode].name, td->fps,
 		tc358743_audio_list[td->audio]);
 }
 
+/* --------------- STATUS --------------- */
+
+static inline bool is_hdmi(struct sensor_data *sd)
+{
+	return tc358743_read_reg_val(sd, SYS_STATUS) & MASK_S_HDMI;
+}
+
+static inline bool tx_5v_power_present(struct sensor_data *sd)
+{
+	return tc358743_read_reg_val(sd, SYS_STATUS) & MASK_S_DDC5V;
+}
+
+static inline bool no_signal(struct sensor_data *sd)
+{
+	return !(tc358743_read_reg_val(sd, SYS_STATUS) & MASK_S_TMDS);
+}
+
+static inline bool no_sync(struct sensor_data *sd)
+{
+	return !(tc358743_read_reg_val(sd, SYS_STATUS) & MASK_S_SYNC);
+}
+
+static inline bool audio_present(struct sensor_data *sd)
+{
+	return tc358743_read_reg_val(sd, AU_STATUS0) & MASK_S_A_SAMPLE;
+}
+
+static void tc358743_reset_phy(struct sensor_data *sd)
+{
+	u8 val = tc358743_read_reg_val(sd, PHY_RST);
+	tc358743_write_reg(sd, PHY_RST, val & ~MASK_RESET_CTRL, 1);
+	tc358743_write_reg(sd, PHY_RST, val | MASK_RESET_CTRL, 1);
+}
+
+static void tc358743_format_change(struct sensor_data *sd)
+{
+	int hsize, vsize, fps, ret;
+	struct tc_data *td = g_td;
+	enum tc358743_mode mode = tc358743_mode_INIT;
+	u32 u32val;
+
+	hsize = tc358743_read_reg_val16(sd, DE_WIDTH_H_LO);
+	vsize = tc358743_read_reg_val16(sd, DE_WIDTH_V_LO);
+
+	if ((hsize == 640) && (vsize == 480))
+		mode = tc358743_mode_480P_640_480;
+	else if ((hsize == 720) && (vsize == 480))
+		mode = tc358743_mode_480P_720_480;
+	else if ((hsize == 1024) && (vsize == 768))
+		mode = tc358743_mode_1024x768;
+	else if (hsize == 1280 && (vsize == 720))
+		mode = tc358743_mode_720P_60_1280_720;
+	else if (hsize == 1920 && (vsize == 1080))
+		mode = tc358743_mode_1080P_1920_1080;
+	else /* discard */
+		return;
+
+	/* Check that the FPS is valid */
+	fps = tc_get_fps(sd);
+	if (tc_fps_to_index(fps) < 0)
+		return;
+
+	/* Return if the mode hasn't changed */
+	if ((td->mode == mode) && (td->fps == tc_fps_to_index(fps)))
+		return;
+
+	pr_info("%s: detect hsize=%d, vsize=%d fps=%d\n",
+		__func__, hsize, vsize, fps);
+
+	/* Update the sensor information */
+	td->mode = mode;
+	td->fps = tc_fps_to_index(fps);
+	sd->streamcap.capturemode = mode;
+	sd->spix.swidth = tc358743_mode_info_data[td->fps][mode].width;
+	sd->spix.sheight = tc358743_mode_info_data[td->fps][mode].height;
+	td->det_changed = 1;
+
+	/* Get audio sample rate */
+	ret = tc358743_read_reg(sd, FS_SET, &u32val);
+	if (ret >= 0)
+		td->audio = ((unsigned char)u32val) & 0x0f;
+
+	report_netlink(td);
+}
+
+static void tc358743_hdmi_misc_int_handler(struct sensor_data *sd)
+{
+	u8 misc_int_mask = tc358743_read_reg_val(sd, MISC_INTM);
+	u8 misc_int = tc358743_read_reg_val(sd, MISC_INT) & ~misc_int_mask;
+
+	tc358743_write_reg(sd, MISC_INT, misc_int, 1);
+
+	pr_debug("%s: MISC_INT = 0x%02x\n", __func__, misc_int);
+
+	if (misc_int & MASK_I_SYNC_CHG) {
+		/* Reset the HDMI PHY to try to trigger proper lock on the
+		 * incoming video format. Erase BKSV to prevent that old keys
+		 * are used when a new source is connected. */
+		if (no_sync(sd) || no_signal(sd))
+			tc358743_reset_phy(sd);
+
+		tc358743_format_change(sd);
+
+		misc_int &= ~MASK_I_SYNC_CHG;
+	}
+
+	if (misc_int)
+		pr_err("%s: Unhandled MISC_INT interrupts: 0x%02x\n",
+		       __func__, misc_int);
+}
+
+static void tc358743_hdmi_cbit_int_handler(struct sensor_data *sd)
+{
+	u8 cbit_int_mask = tc358743_read_reg_val(sd, CBIT_INTM);
+	u8 cbit_int = tc358743_read_reg_val(sd, CBIT_INT) & ~cbit_int_mask;
+
+	tc358743_write_reg(sd, CBIT_INT, cbit_int, 1);
+
+	pr_debug("%s: CBIT_INT = 0x%02x\n", __func__, cbit_int);
+
+	if (cbit_int & MASK_I_CBIT_FS) {
+		pr_debug("%s: Audio sample rate changed\n", __func__);
+		// TODO handle audio sample rate
+		cbit_int &= ~MASK_I_CBIT_FS;
+	}
+
+	if (cbit_int & (MASK_I_AF_LOCK | MASK_I_AF_UNLOCK)) {
+		pr_debug("%s: Audio present changed\n",  __func__);
+		// TODO handle audio present
+		cbit_int &= ~(MASK_I_AF_LOCK | MASK_I_AF_UNLOCK);
+	}
+
+	if (cbit_int)
+		pr_err("%s: Unhandled CBIT_INT interrupts: 0x%02x\n",
+		       __func__, cbit_int);
+}
+
+static void tc358743_hdmi_clk_int_handler(struct sensor_data *sd)
+{
+	u8 clk_int_mask = tc358743_read_reg_val(sd, CLK_INTM);
+	u8 clk_int = tc358743_read_reg_val(sd, CLK_INT) & ~clk_int_mask;
+
+	/* Bit 7 and bit 6 are set even when they are masked */
+	tc358743_write_reg(sd, CLK_INT, clk_int | 0x80 | MASK_I_OUT_H_CHG, 1);
+
+	pr_debug("%s: CLK_INT = 0x%02x\n", __func__, clk_int);
+
+	if (clk_int & (MASK_I_IN_DE_CHG)) {
+		pr_debug("%s: DE size or position has changed\n", __func__);
+
+		/* If the source switch to a new resolution with the same pixel
+		 * frequency as the existing (e.g. 1080p25 -> 720p50), the
+		 * I_SYNC_CHG interrupt is not always triggered, while the
+		 * I_IN_DE_CHG interrupt seems to work fine. Format change
+		 * notifications are only sent when the signal is stable to
+		 * reduce the number of notifications. */
+		if (!no_signal(sd))
+			tc358743_format_change(sd);
+
+		clk_int &= ~(MASK_I_IN_DE_CHG);
+	}
+
+	if (clk_int)
+		pr_err("%s: Unhandled CLK_INT interrupts: 0x%02x\n",
+		       __func__, clk_int);
+}
+
+static void tc358743_hdmi_sys_int_handler(struct sensor_data *sd)
+{
+	u8 sys_int_mask = tc358743_read_reg_val(sd, SYS_INTM);
+	u8 sys_int = tc358743_read_reg_val(sd, SYS_INT) & ~sys_int_mask;
+
+	tc358743_write_reg(sd, SYS_INT, sys_int, 1);
+
+	pr_debug("%s: SYS_INT = 0x%02x\n", __func__, sys_int);
+
+	if (sys_int & MASK_I_DDC) {
+		bool tx_5v = tx_5v_power_present(sd);
+
+		pr_debug("%s: Tx 5V power present: %s\n",
+			 __func__, tx_5v ?  "yes" : "no");
+
+		sys_int &= ~MASK_I_DDC;
+	}
+
+	if (sys_int & MASK_I_DVI) {
+		pr_debug("%s: HDMI->DVI change detected\n", __func__);
+
+		/* Reset the HDMI PHY to try to trigger proper lock on the
+		 * incoming video format. Erase BKSV to prevent that old keys
+		 * are used when a new source is connected. */
+		if (no_sync(sd) || no_signal(sd))
+			tc358743_reset_phy(sd);
+
+		sys_int &= ~MASK_I_DVI;
+	}
+
+	if (sys_int & MASK_I_HDMI) {
+		pr_debug("%s: DVI->HDMI change detected\n", __func__);
+
+		/* Register is reset in DVI mode (REF_01, c. 6.6.41) */
+		tc358743_write_reg(sd, ANA_CTL, MASK_APPL_PCSX_NORMAL |
+				   MASK_ANALOG_ON, 1);
+
+		sys_int &= ~MASK_I_HDMI;
+	}
+
+	if (sys_int)
+		pr_err("%s: Unhandled SYS_INT interrupts: 0x%02x\n",
+		       __func__, sys_int);
+}
+
+static void tc358743_hdmi_audio_int_handler(struct sensor_data *sd)
+{
+	u8 audio_int_mask = tc358743_read_reg_val(sd, AUDIO_INTM);
+	u8 audio_int = tc358743_read_reg_val(sd, AUDIO_INT) & ~audio_int_mask;
+
+	tc358743_write_reg(sd, AUDIO_INT, audio_int, 1);
+
+	pr_debug("%s: AUDIO_INT = 0x%02x\n", __func__, audio_int);
+	// TODO: handle audio change
+}
+
+static void tc358743_csi_err_int_handler(struct sensor_data *sd)
+{
+	pr_debug("%s: CSI_ERR = 0x%x\n", __func__,
+		 tc358743_read_reg_val(sd, CSI_ERR));
+
+	tc358743_write_reg(sd, CSI_INT_CLR, MASK_ICRER, 1);
+}
+
+static irqreturn_t tc358743_detect_handler(int irq, void *data)
+{
+	struct tc_data *td = data;
+	struct sensor_data *sd = &td->sensor;
+	s32 intstatus = tc358743_read_reg_val(sd, INTSTATUS);
+
+	pr_debug("%s: IntStatus = 0x%04x\n", __func__, intstatus);
+
+	if (intstatus & MASK_HDMI_INT) {
+		u8 hdmi_int0 = tc358743_read_reg_val(sd, HDMI_INT0);
+		u8 hdmi_int1 = tc358743_read_reg_val(sd, HDMI_INT1);
+
+		if (hdmi_int0 & MASK_I_MISC)
+			tc358743_hdmi_misc_int_handler(sd);
+		if (hdmi_int1 & MASK_I_CBIT)
+			tc358743_hdmi_cbit_int_handler(sd);
+		if (hdmi_int1 & MASK_I_CLK)
+			tc358743_hdmi_clk_int_handler(sd);
+		if (hdmi_int1 & MASK_I_SYS)
+			tc358743_hdmi_sys_int_handler(sd);
+		if (hdmi_int1 & MASK_I_AUD)
+			tc358743_hdmi_audio_int_handler(sd);
+
+		tc358743_write_reg(sd, INTSTATUS, MASK_HDMI_INT, 2);
+		intstatus &= ~MASK_HDMI_INT;
+	}
+
+	if (intstatus & MASK_CSI_INT) {
+		u32 csi_int = tc358743_read_reg_val(sd, CSI_INT);
+
+		if (csi_int & MASK_INTER)
+			tc358743_csi_err_int_handler(sd);
+
+		tc358743_write_reg(sd, INTSTATUS, MASK_CSI_INT, 2);
+		intstatus &= ~MASK_CSI_INT;
+	}
+
+	/* Should not happen but sometimes the mask seems not to work */
+	if (intstatus) {
+		pr_debug("%s: interrupts 0x%04x not handled\n",
+			 __func__, intstatus);
+		tc358743_write_reg(sd, INTSTATUS, intstatus, 2);
+	}
+
+#ifdef CONFIG_TC358743_DEV
+{
+	struct tc358743_irq_private *priv;
+	priv=td->tc_irq_priv;
+	pr_debug("%s: IRQ %d priv=%p\n", __func__, sd->i2c_client->irq,priv);
+	if (priv)
+	{
+		atomic_inc(&priv->event);
+		wake_up_interruptible(&priv->alarm_wq);
+	}
+}
+#endif
+	return IRQ_HANDLED;
+}
+
+#if 0
 static void tc_ack_interrupts(struct tc_data *td)
 {
 	int i,n;
@@ -4538,7 +4609,9 @@ static void tc_unmask_interrupts(struct tc_data *td)
 {
 	tc_run_program(td,tc358743_setting_interrupts,ARRAY_SIZE(tc358743_setting_interrupts));
 }
+#endif
 
+#if 0
 static void tc_det_worker(struct work_struct *work)
 {
 	struct tc_data *td = container_of(work, struct tc_data, det_work.work);
@@ -4715,6 +4788,7 @@ static irqreturn_t tc358743_detect_handler(int irq, void *data)
 #endif
 	return IRQ_HANDLED;
 }
+#endif
 
 static	u16 regoffs = 0;
 
@@ -4878,7 +4952,6 @@ static ssize_t tc358743_show_audio(struct device *dev,
 static DEVICE_ATTR(audio, S_IRUGO, tc358743_show_audio, NULL);
 #endif
 
-
 static int tc358743_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
@@ -4888,13 +4961,13 @@ static int tc358743_probe(struct i2c_client *client,
 	struct sensor_data *sensor;
 	u8 chip_id_high;
 	u32 u32val;
-	int mode = tc358743_mode_INIT0;
+	int mode = tc358743_mode_INIT;
+	struct gpio_desc *gpiod_irq;
 
 	td = kzalloc(sizeof(*td), GFP_KERNEL);
 	if (!td)
 		return -ENOMEM;
 	td->hpd_active = 1;
-	td->det_work_timeout = DET_WORK_TIMEOUT_DEFAULT;
 	td->audio = 2;
 	mutex_init(&td->access_lock);
 	mutex_lock(&td->access_lock);
@@ -4987,6 +5060,13 @@ static int tc358743_probe(struct i2c_client *client,
 	power_control(td, 1);
 	tc_reset(td);
 
+	/* Making sure the IRQ GPIO is set as an input */
+	gpiod_irq = devm_gpiod_get(dev, "irq");
+	if (!IS_ERR(gpiod_irq)) {
+		gpiod_direction_input(gpiod_irq);
+		gpiod_put(gpiod_irq);
+	}
+
 	u32val = 0;
 	retval = tc358743_read_reg(sensor, TC358743_CHIP_ID_HIGH_BYTE, &u32val);
 	if (retval < 0) {
@@ -4996,24 +5076,28 @@ static int tc358743_probe(struct i2c_client *client,
 	}
 	chip_id_high = (u8)u32val;
 
+#ifdef CONFIG_TC358743_AUDIO
+/* Audio setup */
+	retval = device_create_file(&client->dev, &dev_attr_audio);
+#endif
+
 	tc358743_int_device.priv = td;
 	if (!g_td)
 		g_td = td;
 
-#if 1
-	INIT_DELAYED_WORK(&td->det_work, tc_det_worker);
 	if (sensor->i2c_client->irq) {
-		retval = request_irq(sensor->i2c_client->irq, tc358743_detect_handler,
-				IRQF_SHARED | IRQF_TRIGGER_RISING,
-				"tc358743_det", td);
+		retval = devm_request_threaded_irq(&client->dev,
+						   sensor->i2c_client->irq,
+						   NULL, tc358743_detect_handler,
+						   IRQF_TRIGGER_HIGH |
+						   IRQF_ONESHOT,
+						   "tc358743_det", td);
 		if (retval < 0)
 			dev_warn(&sensor->i2c_client->dev,
 				"cound not request det irq %d\n",
 				sensor->i2c_client->irq);
 	}
 
-	schedule_delayed_work(&td->det_work, msecs_to_jiffies(td->det_work_timeout));
-#endif
 	retval = tc358743_reset(td);
 	if (retval)
 		goto err4;
@@ -5029,10 +5113,7 @@ static int tc358743_probe(struct i2c_client *client,
 	}
 	power_control(td, 0);
 
-#ifdef CONFIG_TC358743_AUDIO
-	retval = device_create_file(&client->dev, &dev_attr_audio);
-#endif
-	retval |= device_create_file(dev, &dev_attr_fps);
+	retval = device_create_file(dev, &dev_attr_fps);
 	retval |= device_create_file(dev, &dev_attr_hdmirx);
 	retval |= device_create_file(dev, &dev_attr_hpd);
 	retval |= device_create_file(dev, &dev_attr_regoffs);
@@ -5042,12 +5123,15 @@ static int tc358743_probe(struct i2c_client *client,
 			__func__, retval);
 		goto err3;
 	}
+	mutex_unlock(&td->access_lock);
+	dev_err(dev, "%s: finished, error=%d\n", __func__, retval);
 
 #ifdef CONFIG_TC358743_DEV
 	tc358743_irq_setup();
 #endif
 
-	mutex_unlock(&td->access_lock);
+	enable_interrupts(sensor);
+	tc358743_toggle_hpd(sensor, td->hpd_active);
 	pr_debug("%s: finished, error=%d\n", __func__, retval);
 	return retval;
 
@@ -5081,17 +5165,10 @@ static int tc358743_remove(struct i2c_client *client)
 {
 	int i;
 	struct tc_data *td = i2c_get_clientdata(client);
-	struct sensor_data *sensor = &td->sensor;
 
-	// Stop delayed work
-	cancel_delayed_work_sync(&td->det_work);
 	mutex_lock(&td->access_lock);
 
 	power_control(td, 0);
-	// Remove IRQ
-	if (sensor->i2c_client->irq) {
-		free_irq(sensor->i2c_client->irq,  sensor);
-	}
 
 	/*Remove sysfs entries*/
 #ifdef CONFIG_TC358743_AUDIO
@@ -5140,7 +5217,6 @@ static __init int tc358743_init(void)
 			__func__, err);
 	}
 #endif
-
 	return err;
 }
 

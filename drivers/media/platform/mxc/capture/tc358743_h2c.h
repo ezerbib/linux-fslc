@@ -45,8 +45,8 @@ struct tc_data {
 	struct sensor_data sensor;
 	struct delayed_work det_work;
 	struct mutex access_lock;
-	int det_work_enable;
-	int det_work_timeout;
+	//int det_work_enable;
+	//int det_work_timeout;
 	int det_changed;
 #define REGULATOR_IO		0
 #define REGULATOR_CORE		1
@@ -68,7 +68,6 @@ struct tc_data {
 	struct tc358743_irq_private *tc_irq_priv;
 #endif
 };
-
 
 extern struct tc_data *tc358743_get_tc_data(void);
 extern s32 tc358743_read_reg(struct sensor_data *sensor, u16 reg, void *rxbuf);
