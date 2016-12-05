@@ -1673,6 +1673,13 @@
 			>;
 		};
 
+        pinctrl_microsom_uart2: microsom-uart2 {
+            fsl,pins = <
+                MX6QDL_PAD_SD4_DAT7__UART2_TX_DATA    0x1b0b1
+                MX6QDL_PAD_SD4_DAT4__UART2_RX_DATA    0x1b0b1
+            >;
+        };
+
 		pinctrl_microsom_uart4: microsom-uart4 {
 			fsl,pins = <
 				MX6QDL_PAD_CSI0_DAT12__UART4_TX_DATA 0x1b0b1
@@ -1699,6 +1706,12 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_microsom_uart1>;
 	status = "okay";
+};
+
+&uart2 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&pinctrl_microsom_uart2>;
+    status = "okay";
 };
 
 /* UART4 - Connected to optional BRCM Wifi/BT/FM */
