@@ -178,6 +178,17 @@ const struct fb_videomode mxc_cea_mode[64] = {
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0,
 	},
+	/* #35: (2880)x480p4x@59.94/60Hz */
+	[35] = {
+		NULL, 60, 2880, 480, 9250, 240, 64, 30, 9, 248, 6, 0,
+		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_4_3, 0,
+	},
+	/* #16: 1920x1080p@60Hz 16:9 */
+	//[16] = {
+	//	NULL, 60, 1920, 1080, 6734, 148, 88, 36, 4, 44, 5,
+	//	FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+	//	FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0,
+	//},
 	/* #41: 1280x720p@100Hz 16:9 */
 	[41] = {
 		NULL, 100, 1280, 720, 6734, 220, 440, 20, 5, 40, 5,
@@ -187,6 +198,18 @@ const struct fb_videomode mxc_cea_mode[64] = {
 	/* #47: 1280x720p@119.88/120Hz 16:9 */
 	[47] = {
 		NULL, 120, 1280, 720, 6734, 220, 110, 20, 5, 40, 5,
+		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0
+	},
+	/* #4: 1280x720p@59.94/60Hz 16:9 */
+	//[4] = {
+	//	NULL, 60, 1280, 720, 13468, 220, 110, 20, 5, 40, 5,
+	//	FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+	//	FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0
+	//},
+	/* #62: 1280x720p@30Hz 16:9 */
+	[62] = {
+		NULL, 30, 1280, 720, 13468, 220, 1760, 20, 5, 40, 5,
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0
 	},
@@ -622,8 +645,10 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 
 	m = kmalloc((num + specs->modedb_len) *
 			sizeof(struct fb_videomode), GFP_KERNEL);
-	if (!m)
+	if (!m) {
+		kfree(mode);
 		return 0;
+	}
 
 	if (specs->modedb_len) {
 		memmove(m, specs->modedb,
@@ -640,6 +665,29 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 	return 0;
 }
 EXPORT_SYMBOL(mxc_edid_parse_ext_blk);
+
+unsigned char *override_edid;
+
+void mxc_set_edid_address(unsigned char *edid)
+{
+	pr_debug("%s: edid=%p\n", __func__, edid);
+	override_edid = edid;
+}
+EXPORT_SYMBOL(mxc_set_edid_address);
+
+static int mxc_edid_override(struct i2c_adapter *adp,
+		unsigned short addr, unsigned char *edid)
+{
+	int extblknum = 0;
+	unsigned char *slim_edid = override_edid;
+	memcpy(edid, slim_edid, EDID_LENGTH);
+
+	pr_debug("%s: for slim\n", __func__);
+	extblknum = edid[0x7E];
+	if (extblknum)
+		memcpy(edid + EDID_LENGTH, slim_edid + EDID_LENGTH, EDID_LENGTH);
+	return extblknum;
+}
 
 static int mxc_edid_readblk(struct i2c_adapter *adp,
 		unsigned short addr, unsigned char *edid)
@@ -659,6 +707,9 @@ static int mxc_edid_readblk(struct i2c_adapter *adp,
 		.buf	= edid,
 		},
 	};
+
+	if (override_edid)
+		return mxc_edid_override(adp, addr, edid);
 
 	ret = i2c_transfer(adp, msg, ARRAY_SIZE(msg));
 	if (ret != ARRAY_SIZE(msg)) {
@@ -788,7 +839,10 @@ int mxc_edid_read(struct i2c_adapter *adp, unsigned short addr,
 
 		/* FIXME: mxc_edid_readsegblk() won't read more than 2 blocks
 		 * and the for-loop will read past the end of the buffer! :-( */
-		BUG_ON(extblknum > 3);
+		if (extblknum > 3) {
+			WARN_ON(true);
+			return -EINVAL;
+		}
 
 		/* need read segment block? */
 		if (extblknum > 1) {
