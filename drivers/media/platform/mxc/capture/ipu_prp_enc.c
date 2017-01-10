@@ -1,5 +1,5 @@
 /*
- * Copyright 2004-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright 2004-2015 Freescale Semiconductor, Inc. All Rights Reserved.
  */
 
 /*
@@ -71,6 +71,11 @@ static int prp_enc_setup(cam_data *cam)
 	ipu_channel_params_t enc;
 	int err = 0;
 	dma_addr_t dummy = cam->dummy_frame.buffer.m.offset;
+#ifdef CONFIG_MXC_MIPI_CSI2
+	void *mipi_csi2_info;
+	int ipu_id;
+	int csi_id;
+#endif
 
 	CAMERA_TRACE("In prp_enc_setup\n");
 	if (!cam) {
@@ -128,13 +133,40 @@ static int prp_enc_setup(cam_data *cam)
 		printk(KERN_ERR "format not supported\n");
 		return -EINVAL;
 	}
-	err = cam_mipi_csi2_enable(cam, &enc.csi_prp_enc_mem.mipi);
-	if (err)
-		return err;
 
-	err = ipu_channel_request(cam->ipu, CSI_PRP_ENC_MEM, &enc, &cam->ipu_chan);
-	if (err) {
-		pr_err("%s:ipu_channel_request %d\n", __func__, err);
+#ifdef CONFIG_MXC_MIPI_CSI2
+	mipi_csi2_info = mipi_csi2_get_info();
+
+	if (mipi_csi2_info) {
+		if (mipi_csi2_get_status(mipi_csi2_info)) {
+			ipu_id = mipi_csi2_get_bind_ipu(mipi_csi2_info);
+			csi_id = mipi_csi2_get_bind_csi(mipi_csi2_info);
+
+			if (cam->ipu == ipu_get_soc(ipu_id)
+				&& cam->csi == csi_id) {
+				enc.csi_prp_enc_mem.mipi_en = true;
+				enc.csi_prp_enc_mem.mipi_vc =
+				mipi_csi2_get_virtual_channel(mipi_csi2_info);
+				enc.csi_prp_enc_mem.mipi_id =
+				mipi_csi2_get_datatype(mipi_csi2_info);
+
+				mipi_csi2_pixelclk_enable(mipi_csi2_info);
+			} else {
+				enc.csi_prp_enc_mem.mipi_en = false;
+				enc.csi_prp_enc_mem.mipi_vc = 0;
+				enc.csi_prp_enc_mem.mipi_id = 0;
+			}
+		} else {
+			enc.csi_prp_enc_mem.mipi_en = false;
+			enc.csi_prp_enc_mem.mipi_vc = 0;
+			enc.csi_prp_enc_mem.mipi_id = 0;
+		}
+	}
+#endif
+
+	err = ipu_init_channel(cam->ipu, CSI_PRP_ENC_MEM, &enc);
+	if (err != 0) {
+		printk(KERN_ERR "ipu_init_channel %d\n", err);
 		return err;
 	}
 
@@ -190,9 +222,9 @@ static int prp_enc_setup(cam_data *cam)
 			return err;
 		}
 
-		err = ipu_channel_request(cam->ipu, MEM_ROT_ENC_MEM, NULL, &cam->ipu_chan_rot);
-		if (err) {
-			pr_err("%s:ipu_channel_request %d for rot\n", __func__, err);
+		err = ipu_init_channel(cam->ipu, MEM_ROT_ENC_MEM, NULL);
+		if (err != 0) {
+			printk(KERN_ERR "MEM_ROT_ENC_MEM channel err\n");
 			return err;
 		}
 
@@ -282,15 +314,17 @@ static int prp_enc_setup(cam_data *cam)
 /*!
  * function to update physical buffer address for encorder IDMA channel
  *
+ * @param private     pointer to cam_data structure
  * @param eba         physical buffer address for encorder IDMA channel
- * @param buffer_num  int buffer 0 or buffer 1
  *
  * @return  status
  */
-static int prp_enc_eba_update(struct ipu_soc *ipu, dma_addr_t eba,
-			      int *buffer_num)
+static int prp_enc_eba_update(void *private, dma_addr_t eba)
 {
 	int err = 0;
+	cam_data *cam = (cam_data *) private;
+	struct ipu_soc *ipu = cam->ipu;
+	int *buffer_num = &cam->ping_pong_csi;
 
 	pr_debug("eba %x\n", eba);
 	if (grotation >= IPU_ROTATE_90_RIGHT) {
@@ -350,7 +384,6 @@ static int prp_enc_enabling_tasks(void *private)
 {
 	cam_data *cam = (cam_data *) private;
 	int err = 0;
-	int irq;
 	CAMERA_TRACE("IPU:In prp_enc_enabling_tasks\n");
 
 	cam->dummy_frame.vaddress = dma_alloc_coherent(0,
@@ -367,12 +400,15 @@ static int prp_enc_enabling_tasks(void *private)
 	    PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage);
 	cam->dummy_frame.buffer.m.offset = cam->dummy_frame.paddress;
 
-	irq = (cam->rotation >= IPU_ROTATE_90_RIGHT) ?
-		IPU_IRQ_PRP_ENC_ROT_OUT_EOF : IPU_IRQ_PRP_ENC_OUT_EOF;
-	err = ipu_request_irq(cam->ipu, irq,
-			      prp_enc_callback, 0, "Mxc Camera", cam);
-	if (err) {
-		pr_err("%s: Error requesting irq=%d\n", __func__, irq);
+	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+		err = ipu_request_irq(cam->ipu, IPU_IRQ_PRP_ENC_ROT_OUT_EOF,
+				      prp_enc_callback, 0, "Mxc Camera", cam);
+	} else {
+		err = ipu_request_irq(cam->ipu, IPU_IRQ_PRP_ENC_OUT_EOF,
+				      prp_enc_callback, 0, "Mxc Camera", cam);
+	}
+	if (err != 0) {
+		printk(KERN_ERR "Error registering rot irq\n");
 		return err;
 	}
 
@@ -395,19 +431,24 @@ static int prp_enc_disabling_tasks(void *private)
 {
 	cam_data *cam = (cam_data *) private;
 	int err = 0;
-	int err2 = 0;
-	int err3 = 0;
+#ifdef CONFIG_MXC_MIPI_CSI2
+	void *mipi_csi2_info;
+	int ipu_id;
+	int csi_id;
+#endif
 
 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
 		ipu_free_irq(cam->ipu, IPU_IRQ_PRP_ENC_ROT_OUT_EOF, cam);
 		ipu_unlink_channels(cam->ipu, CSI_PRP_ENC_MEM, MEM_ROT_ENC_MEM);
 	}
 
-	err = ipu_channel_disable(cam->ipu_chan, true);
-	err2 = ipu_channel_disable(cam->ipu_chan_rot, true);
+	err = ipu_disable_channel(cam->ipu, CSI_PRP_ENC_MEM, true);
+	if (cam->rotation >= IPU_ROTATE_90_RIGHT)
+		err |= ipu_disable_channel(cam->ipu, MEM_ROT_ENC_MEM, true);
 
-	ipu_channel_free(&cam->ipu_chan);
-	ipu_channel_free(&cam->ipu_chan_rot);
+	ipu_uninit_channel(cam->ipu, CSI_PRP_ENC_MEM);
+	if (cam->rotation >= IPU_ROTATE_90_RIGHT)
+		ipu_uninit_channel(cam->ipu, MEM_ROT_ENC_MEM);
 
 	if (cam->dummy_frame.vaddress != 0) {
 		dma_free_coherent(0, cam->dummy_frame.buffer.length,
@@ -415,8 +456,23 @@ static int prp_enc_disabling_tasks(void *private)
 				  cam->dummy_frame.paddress);
 		cam->dummy_frame.vaddress = 0;
 	}
-	err3 = cam_mipi_csi2_disable(cam);
-	return err ? err : (err2 ? err2 : err3);
+
+#ifdef CONFIG_MXC_MIPI_CSI2
+	mipi_csi2_info = mipi_csi2_get_info();
+
+	if (mipi_csi2_info) {
+		if (mipi_csi2_get_status(mipi_csi2_info)) {
+			ipu_id = mipi_csi2_get_bind_ipu(mipi_csi2_info);
+			csi_id = mipi_csi2_get_bind_csi(mipi_csi2_info);
+
+			if (cam->ipu == ipu_get_soc(ipu_id)
+				&& cam->csi == csi_id)
+				mipi_csi2_pixelclk_disable(mipi_csi2_info);
+		}
+	}
+#endif
+
+	return err;
 }
 
 /*!
@@ -427,7 +483,9 @@ static int prp_enc_disabling_tasks(void *private)
  */
 static int prp_enc_enable_csi(void *private)
 {
-	return cam_ipu_enable_csi((cam_data *)private);
+	cam_data *cam = (cam_data *) private;
+
+	return ipu_enable_csi(cam->ipu, cam->csi);
 }
 
 /*!
@@ -445,7 +503,8 @@ static int prp_enc_disable_csi(void *private)
 	 * it requests eof irq again */
 	if (cam->rotation < IPU_ROTATE_90_RIGHT)
 		ipu_free_irq(cam->ipu, IPU_IRQ_PRP_ENC_OUT_EOF, cam);
-	return cam_ipu_disable_csi(cam);
+
+	return ipu_disable_csi(cam->ipu, cam->csi);
 }
 
 /*!

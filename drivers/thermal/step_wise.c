@@ -70,12 +70,10 @@ static unsigned long get_target_state(struct thermal_instance *instance,
 			if (next_target < instance->lower)
 				next_target = instance->lower;
 		}
-		dev_dbg(&cdev->device, "THERMAL_TREND_RAISING: next_target=%ld\n", next_target);
 		break;
 	case THERMAL_TREND_RAISE_FULL:
 		if (throttle)
 			next_target = instance->upper;
-		dev_dbg(&cdev->device, "THERMAL_TREND_RAISE_FULL: next_target=%ld\n", next_target);
 		break;
 	case THERMAL_TREND_DROPPING:
 		if (cur_state <= instance->lower) {
@@ -86,7 +84,6 @@ static unsigned long get_target_state(struct thermal_instance *instance,
 			if (next_target > instance->upper)
 				next_target = instance->upper;
 		}
-		dev_dbg(&cdev->device, "THERMAL_TREND_DROPPING: next_target=%ld\n", next_target);
 		break;
 	case THERMAL_TREND_DROP_FULL:
 		if (cur_state == instance->lower) {
@@ -94,7 +91,6 @@ static unsigned long get_target_state(struct thermal_instance *instance,
 				next_target = THERMAL_NO_TARGET;
 		} else
 			next_target = instance->lower;
-		dev_dbg(&cdev->device, "THERMAL_TREND_DROP_FULL: next_target=%ld\n", next_target);
 		break;
 	default:
 		break;
@@ -121,7 +117,7 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 	enum thermal_trend trend;
 	struct thermal_instance *instance;
 	bool throttle = false;
-	unsigned long old_target;
+	int old_target;
 
 	if (trip == THERMAL_TRIPS_NONE) {
 		trip_temp = tz->forced_passive;
@@ -147,8 +143,8 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 
 		old_target = instance->target;
 		instance->target = get_target_state(instance, trend, throttle);
-		dev_dbg(&instance->cdev->device, "old_target=%ld, target=%ld\n",
-					old_target, instance->target);
+		dev_dbg(&instance->cdev->device, "old_target=%d, target=%d\n",
+					old_target, (int)instance->target);
 
 		/* Activate a passive thermal instance */
 		if (old_target == THERMAL_NO_TARGET &&

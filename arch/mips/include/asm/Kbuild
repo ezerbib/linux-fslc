@@ -15,4 +15,3 @@ generic-y += preempt.h
 generic-y += ucontext.h
 generic-y += xor.h
 generic-y += hash.h
-generic-y += irq_work.h

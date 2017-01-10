@@ -51,13 +51,11 @@ static void __init highbank_scu_map_io(void)
 }
 
 
-static void highbank_l2c310_write_sec(unsigned long val, unsigned reg)
+static void highbank_l2x0_disable(void)
 {
-	if (reg == L2X0_CTRL)
-		highbank_smc1(0x102, val);
-	else
-		WARN_ONCE(1, "Highbank L2C310: ignoring write to reg 0x%x\n",
-			  reg);
+	outer_flush_all();
+	/* Disable PL310 L2 Cache controller */
+	highbank_smc1(0x102, 0x0);
 }
 
 static void __init highbank_init_irq(void)
@@ -68,9 +66,11 @@ static void __init highbank_init_irq(void)
 		highbank_scu_map_io();
 
 	/* Enable PL310 L2 Cache controller */
-	if (IS_ENABLED(CONFIG_CACHE_L2X0)) {
-		outer_cache.write_sec = highbank_l2c310_write_sec;
-		l2x0_of_init(0, ~0);
+	if (IS_ENABLED(CONFIG_CACHE_L2X0) &&
+	    of_find_compatible_node(NULL, NULL, "arm,pl310-cache")) {
+		highbank_smc1(0x102, 0x1);
+		l2x0_of_init(0, ~0UL);
+		outer_cache.disable = highbank_l2x0_disable;
 	}
 }
 

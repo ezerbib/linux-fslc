@@ -123,9 +123,12 @@ void ci_handle_id_switch(struct ci_hdrc *ci)
 		}
 
 		ci_role_stop(ci);
-		/* wait vbus lower than OTGSC_BSV */
-		hw_wait_reg(ci, OP_OTGSC, OTGSC_BSV, 0,
-				CI_VBUS_STABLE_TIMEOUT_MS);
+
+		if (role == CI_ROLE_GADGET)
+			/* wait vbus lower than OTGSC_BSV */
+			hw_wait_reg(ci, OP_OTGSC, OTGSC_BSV, 0,
+					CI_VBUS_STABLE_TIMEOUT_MS);
+
 		ci_role_start(ci, role);
 	}
 }
@@ -199,7 +202,7 @@ static void ci_otg_work(struct work_struct *work)
 int ci_hdrc_otg_init(struct ci_hdrc *ci)
 {
 	INIT_WORK(&ci->work, ci_otg_work);
-	ci->wq = create_singlethread_workqueue("ci_otg");
+	ci->wq = create_freezable_workqueue("ci_otg");
 	if (!ci->wq) {
 		dev_err(ci->dev, "can't create workqueue\n");
 		return -ENODEV;
@@ -217,13 +220,14 @@ int ci_hdrc_otg_init(struct ci_hdrc *ci)
  */
 void ci_hdrc_otg_destroy(struct ci_hdrc *ci)
 {
-	if (ci->wq) {
-		flush_workqueue(ci->wq);
-		destroy_workqueue(ci->wq);
-	}
 	/* Disable all OTG irq and clear status */
 	hw_write_otgsc(ci, OTGSC_INT_EN_BITS | OTGSC_INT_STATUS_BITS,
 						OTGSC_INT_STATUS_BITS);
+	if (ci->wq) {
+		flush_workqueue(ci->wq);
+		destroy_workqueue(ci->wq);
+		ci->wq = NULL;
+	}
 	if (ci_otg_is_fsm_mode(ci))
 		ci_hdrc_otg_fsm_remove(ci);
 }

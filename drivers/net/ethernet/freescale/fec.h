@@ -245,7 +245,6 @@ struct bufdesc_ex {
 #define BD_ENET_RX_OV           ((ushort)0x0002)
 #define BD_ENET_RX_CL           ((ushort)0x0001)
 #define BD_ENET_RX_STATS        ((ushort)0x013f)        /* All status bits */
-#define BD_ENET_RX_ERROR	((ushort)0x003f)
 
 /* Enhanced buffer descriptor control/status used by Ethernet receive */
 #define BD_ENET_RX_VLAN         0x00000004
@@ -366,6 +365,7 @@ struct bufdesc_ex {
 
 #define FEC_DEFAULT_IMASK (FEC_ENET_TXF | FEC_ENET_RXF | FEC_ENET_MII | FEC_ENET_TS_TIMER)
 #define FEC_RX_DISABLED_IMASK (FEC_DEFAULT_IMASK & (~FEC_ENET_RXF))
+#define FEC_TIMER_DISABLED_IMASK (FEC_DEFAULT_IMASK & (~FEC_ENET_TS_TIMER))
 
 #define FEC_ENET_ETHEREN	((uint)0x00000002)
 
@@ -433,6 +433,12 @@ struct bufdesc_ex {
  * is capture in the register clock domain.
  */
 #define FEC_QUIRK_TKT210590             (1 << 11)
+
+struct fec_enet_stop_mode {
+	struct regmap *gpr;
+	u8 req_gpr;
+	u8 req_bit;
+};
 
 struct fec_enet_priv_tx_q {
 	int index;
@@ -511,6 +517,7 @@ struct fec_enet_private {
 	struct	phy_device *phy_dev;
 	int	mii_timeout;
 	int	mii_bus_share;
+	bool	miibus_up_failed;
 	uint	phy_speed;
 	phy_interface_t	phy_interface;
 	struct device_node *phy_node;
@@ -522,6 +529,7 @@ struct fec_enet_private {
 	bool	bufdesc_ex;
 	int	pause_flag;
 	int	wol_flag;
+	int	wake_irq;
 	u32	quirks;
 
 	struct	napi_struct napi;
@@ -563,6 +571,8 @@ struct fec_enet_private {
 	unsigned int reload_period;
 	int pps_enable;
 	unsigned int next_counter;
+
+	struct fec_enet_stop_mode gpr;
 };
 
 void fec_ptp_init(struct platform_device *pdev);

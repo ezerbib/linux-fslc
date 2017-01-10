@@ -136,13 +136,13 @@ static struct cea_channel_speaker_allocation channel_allocations[] = {
 					 /* 2.1 */
 	{ .ca_index = 0x01, .speakers = {   0,    0,   0,   0,   0,  LFE,  FR,  FL },},
 					 /* Dolby Surround */
-	{ .ca_index = 0x08, .speakers = {   0,    0,  RR,  RL,   0,    0,  FR,  FL },},  /* Prefer FL/FR/RL/RR over FL/FR/LFE/FC */
 	{ .ca_index = 0x02, .speakers = {   0,    0,   0,   0,  FC,    0,  FR,  FL },},
 	{ .ca_index = 0x03, .speakers = {   0,    0,   0,   0,  FC,  LFE,  FR,  FL },},
 	{ .ca_index = 0x04, .speakers = {   0,    0,   0,  RC,   0,    0,  FR,  FL },},
 	{ .ca_index = 0x05, .speakers = {   0,    0,   0,  RC,   0,  LFE,  FR,  FL },},
 	{ .ca_index = 0x06, .speakers = {   0,    0,   0,  RC,  FC,    0,  FR,  FL },},
 	{ .ca_index = 0x07, .speakers = {   0,    0,   0,  RC,  FC,  LFE,  FR,  FL },},
+	{ .ca_index = 0x08, .speakers = {   0,    0,  RR,  RL,   0,    0,  FR,  FL },},
 	{ .ca_index = 0x09, .speakers = {   0,    0,  RR,  RL,   0,  LFE,  FR,  FL },},
 	{ .ca_index = 0x0a, .speakers = {   0,    0,  RR,  RL,  FC,    0,  FR,  FL },},
 					 /* surround51 */
@@ -277,11 +277,10 @@ static int cea_audio_rates[HDMI_MAX_RATES] = {
 static void fsl_hdmi_get_playback_rates(void)
 {
 	int i, count = 0;
-	u8 rates = edid_cfg.sample_rates[0] | edid_cfg.sample_rates[1] |
-			edid_cfg.sample_rates[2] | edid_cfg.sample_rates[3];
+	u8 rates;
 
 	/* Always assume basic audio support */
-	rates |= 0x07;
+	rates = edid_cfg.sample_rates | 0x7;
 
 	for (i = 0 ; i < HDMI_MAX_RATES ; i++)
 		if ((rates & (1 << i)) != 0)
@@ -297,14 +296,12 @@ static void fsl_hdmi_get_playback_rates(void)
 static void fsl_hdmi_get_playback_sample_size(void)
 {
 	int i = 0;
-	u8 sizes = edid_cfg.sample_sizes[0] | edid_cfg.sample_sizes[1] |
-			edid_cfg.sample_sizes[2] | edid_cfg.sample_sizes[3];
 
 	/* Always assume basic audio support */
 	playback_sample_size[i++] = 16;
 
-	if (sizes & 0x4)
-		playback_sample_size[i++] = 32;
+	if (edid_cfg.sample_sizes & 0x4)
+		playback_sample_size[i++] = 24;
 
 	playback_constraint_bits.list = playback_sample_size;
 	playback_constraint_bits.count = i;
@@ -321,9 +318,8 @@ static void fsl_hdmi_get_playback_channels(void)
 	playback_channels[i++] = channels;
 	channels += 2;
 
-	while (i < HDMI_MAX_CHANNEL_CONSTRAINTS &&
-	       i < ARRAY_SIZE(edid_cfg.sample_rates) &&
-	       edid_cfg.sample_rates[i] && edid_cfg.sample_sizes[i]) {
+	while ((i < HDMI_MAX_CHANNEL_CONSTRAINTS) &&
+			(channels <= edid_cfg.max_channels)) {
 		playback_channels[i++] = channels;
 		channels += 2;
 	}
@@ -335,125 +331,33 @@ static void fsl_hdmi_get_playback_channels(void)
 		pr_debug("%s: constraint = %d channels\n", __func__, playback_channels[i]);
 }
 
-static int fsl_hw_rule_channels_by_rate(struct snd_pcm_hw_params *params,
-                                        struct snd_pcm_hw_rule *rule)
-{
-	struct snd_interval	*r = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
-	struct snd_interval	*c = hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
-	int    			i;
-	u8     			m;
-	struct snd_interval	n;
-
-	if (snd_interval_single(r)) {
-		m = 0;
-		for (i = 0; i < HDMI_MAX_RATES; i++) {
-			if (snd_interval_min(r) == cea_audio_rates[i]) {
-				m = 1 << i;
-				break;
-			}
-		}
-
-		if (m) {
-			snd_interval_any(&n);
-			n.min = n.max = 2;
-
-			for (i = 1; i < ARRAY_SIZE(edid_cfg.sample_rates); i++) {
-				if (!(edid_cfg.sample_rates[i] & m))
-					break;
-				n.max += 2;
-			}
-
-			pr_debug("%s: rate = %d, channels = %d..%d\n",
-				 __func__, r->min, n.min, n.max);
-
-			return snd_interval_refine(c, &n);
-		}
-	}
-
-	return 0;
-}
-
-static int fsl_hw_rule_rate_by_channels(struct snd_pcm_hw_params *params,
-                                        struct snd_pcm_hw_rule *rule)
-{
-	struct snd_interval	*r = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
-	struct snd_interval	*c = hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
-	int    			i, rate;
-	u8     			m;
-	struct snd_interval	n;
-
-	if (snd_interval_single(c)) {
-		i = (snd_interval_min(c) - 1) / 2;
-		m = edid_cfg.sample_rates[i];
-
-		if (m) {
-			snd_interval_any(&n);
-			n.min = 192000;
-			n.max = 32000;
-
-			for (i = 0; i < HDMI_MAX_RATES; i++, m >>= 1) {
-				if (!(m & 1))
-					  continue;
-
-				rate = cea_audio_rates[i];
-				if ( rate < n.min)
-					n.min = rate;
-				if ( rate > n.max)
-					n.max = rate;
-			}
-
-			pr_debug("%s: channels = %d, rates = %d..%d\n",
-				 __func__, c->min, n.min, n.max);
-
-			return snd_interval_refine(r, &n);
-		}
-	}
-
-	return 0;
-}
-
 static int fsl_hdmi_update_constraints(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	int edid_status, ret;
+	int ret;
 
-	edid_status = hdmi_get_edid_cfg(&edid_cfg);
-
-	if (edid_status && !edid_cfg.hdmi_cap)
-		return -1;
+	hdmi_get_edid_cfg(&edid_cfg);
 
 	fsl_hdmi_get_playback_rates();
 	ret = snd_pcm_hw_constraint_list(runtime, 0, SNDRV_PCM_HW_PARAM_RATE,
 			&playback_constraint_rates);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	fsl_hdmi_get_playback_sample_size();
 	ret = snd_pcm_hw_constraint_list(runtime, 0, SNDRV_PCM_HW_PARAM_SAMPLE_BITS,
 			&playback_constraint_bits);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	fsl_hdmi_get_playback_channels();
 	ret = snd_pcm_hw_constraint_list(runtime, 0, SNDRV_PCM_HW_PARAM_CHANNELS,
 			&playback_constraint_channels);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	ret = snd_pcm_hw_constraint_integer(runtime, SNDRV_PCM_HW_PARAM_PERIODS);
-	if (ret < 0)
-		return ret;
-
-	ret = snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_CHANNELS,
-			fsl_hw_rule_channels_by_rate, NULL,
-			SNDRV_PCM_HW_PARAM_RATE, -1);
-	if (ret < 0)
-		return ret;
-
-	ret = snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_RATE,
-			fsl_hw_rule_rate_by_channels, NULL,
-			SNDRV_PCM_HW_PARAM_CHANNELS, -1);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	return 0;
@@ -465,10 +369,6 @@ static int fsl_hdmi_soc_startup(struct snd_pcm_substream *substream,
 	struct imx_hdmi *hdmi_data = snd_soc_dai_get_drvdata(dai);
 	int ret;
 
-	ret = fsl_hdmi_update_constraints(substream);
-	if (ret < 0)
-		return ret;
-
 	clk_prepare_enable(hdmi_data->mipi_core_clk);
 	clk_prepare_enable(hdmi_data->isfr_clk);
 	clk_prepare_enable(hdmi_data->iahb_clk);
@@ -477,6 +377,10 @@ static int fsl_hdmi_soc_startup(struct snd_pcm_substream *substream,
 			(int)clk_get_rate(hdmi_data->mipi_core_clk),
 			(int)clk_get_rate(hdmi_data->isfr_clk),
 			(int)clk_get_rate(hdmi_data->iahb_clk));
+
+	ret = fsl_hdmi_update_constraints(substream);
+	if (ret < 0)
+		return ret;
 
 	/* Indicates the subpacket represents a flatline sample */
 	hdmi_audio_writeb(FC_AUDSCONF, AUD_PACKET_SAMPFIT, 0x0);
@@ -530,7 +434,7 @@ static int fsl_hdmi_iec_get(struct snd_kcontrol *kcontrol,
 {
 	int i;
 
-	for (i = 0 ; i < 6 ; i++)
+	for (i = 0 ; i < 4 ; i++)
 		uvalue->value.iec958.status[i] = iec_header.status[i];
 
 	return 0;
@@ -545,7 +449,7 @@ static int fsl_hdmi_iec_put(struct snd_kcontrol *kcontrol,
 	if (uvalue->value.iec958.status[0] & IEC958_AES0_PROFESSIONAL)
 		return -EPERM;
 
-	for (i = 0 ; i < 6 ; i++) {
+	for (i = 0 ; i < 4 ; i++) {
 		iec_header.status[i] = uvalue->value.iec958.status[i];
 		pr_debug("%s status[%d]=0x%02x\n", __func__, i, iec_header.status[i]);
 	}

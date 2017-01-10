@@ -2990,7 +2990,8 @@ int mipi_reset(void *mipi_csi2_info,
 		pr_err("Can not enable mipi csi2 driver!\n");
 		return -1;
 	}
-	lanes = mipi_csi2_set_lanes(mipi_csi2_info, lanes);
+	((struct mipi_csi2_info *)mipi_csi2_info)->lanes=lanes;
+	lanes = mipi_csi2_set_lanes(mipi_csi2_info);
 	pr_debug("Now Using %d lanes\n", lanes);
 
 	mipi_csi2_reset(mipi_csi2_info);

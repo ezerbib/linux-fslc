@@ -1,5 +1,5 @@
 /*
- * Copyright 2009-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright 2009-2015 Freescale Semiconductor, Inc. All Rights Reserved.
  */
 
 /*
@@ -62,18 +62,18 @@ const struct fb_videomode mxc_cea_mode[64] = {
 	},
 	/* #5: 1920x1080i@59.94/60Hz 16:9 */
 	[5] = {
-		NULL, 60, 1920, 1080, 13763, 148, 88, 15, 2, 44, 5,
+		NULL, 60, 1920, 1080, 13468, 88, 148, 4, 31, 44, 10,
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		FB_VMODE_INTERLACED | FB_VMODE_ASPECT_16_9, 0,
 	},
 	/* #6: 720(1440)x480iH@59.94/60Hz 4:3 */
 	[6] = {
-		NULL, 60, 1440, 480, 18554/*37108*/, 114, 38, 15, 4, 124, 3, 0,
+		NULL, 60, 1440, 480, 37037, 38, 114, 8, 31, 124, 6, 0,
 		FB_VMODE_INTERLACED | FB_VMODE_ASPECT_4_3, 0,
 	},
 	/* #7: 720(1440)x480iH@59.94/60Hz 16:9 */
 	[7] = {
-		NULL, 60, 1440, 480, 18554/*37108*/, 114, 38, 15, 4, 124, 3, 0,
+		NULL, 60, 1440, 480, 37037, 38, 114, 8, 31, 124, 6, 0,
 		FB_VMODE_INTERLACED | FB_VMODE_ASPECT_16_9, 0,
 	},
 	/* #8: 720(1440)x240pH@59.94/60Hz 4:3 */
@@ -120,7 +120,7 @@ const struct fb_videomode mxc_cea_mode[64] = {
 	},
 	/* #20: 1920x1080i@50Hz */
 	[20] = {
-		NULL, 50, 1920, 1080, 13480, 148, 528, 15, 5, 528, 5,
+		NULL, 50, 1920, 1080, 13468, 528, 148, 4, 31, 44, 10,
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		FB_VMODE_INTERLACED | FB_VMODE_ASPECT_16_9, 0,
 	},
@@ -178,17 +178,6 @@ const struct fb_videomode mxc_cea_mode[64] = {
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0,
 	},
-	/* #35: (2880)x480p4x@59.94/60Hz */
-	[35] = {
-		NULL, 60, 2880, 480, 9250, 240, 64, 30, 9, 248, 6, 0,
-		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_4_3, 0,
-	},
-	/* #16: 1920x1080p@60Hz 16:9 */
-	//[16] = {
-	//	NULL, 60, 1920, 1080, 6734, 148, 88, 36, 4, 44, 5,
-	//	FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
-	//	FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0,
-	//},
 	/* #41: 1280x720p@100Hz 16:9 */
 	[41] = {
 		NULL, 100, 1280, 720, 6734, 220, 440, 20, 5, 40, 5,
@@ -201,34 +190,7 @@ const struct fb_videomode mxc_cea_mode[64] = {
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0
 	},
-	/* #4: 1280x720p@59.94/60Hz 16:9 */
-	//[4] = {
-	//	NULL, 60, 1280, 720, 13468, 220, 110, 20, 5, 40, 5,
-	//	FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
-	//	FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0
-	//},
-	/* #62: 1280x720p@30Hz 16:9 */
-	[62] = {
-		NULL, 30, 1280, 720, 13468, 220, 1760, 20, 5, 40, 5,
-		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
-		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0
-	},
 };
-
-/* 0x8 is FB_VMODE_FRACT (not yet merged) */
-#define FB_VMODE_MASK_SIMPLE (FB_VMODE_NONINTERLACED | FB_VMODE_INTERLACED | 0x8)
-
-int mxc_fb_mode_is_equal_res(const struct fb_videomode *mode1,
-			     const struct fb_videomode *mode2)
-{
-	return (mode1->xres         == mode2->xres &&
-		mode1->yres         == mode2->yres &&
-		mode1->refresh      == mode2->refresh &&
-		mode1->sync         == mode2->sync &&
-		(mode1->vmode & FB_VMODE_MASK_SIMPLE) ==
-		(mode2->vmode & FB_VMODE_MASK_SIMPLE));
-}
-EXPORT_SYMBOL(mxc_fb_mode_is_equal_res);
 
 /*
  * We have a special version of fb_mode_is_equal that ignores
@@ -334,19 +296,11 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 
 	detail_timing_desc_offset = edid[index++];
 
-	memset(cfg->sample_rates, 0, sizeof(cfg->sample_rates));
-	memset(cfg->sample_sizes, 0, sizeof(cfg->sample_sizes));
-
 	if (revision >= 2) {
 		cfg->cea_underscan = (edid[index] >> 7) & 0x1;
 		cfg->cea_basicaudio = (edid[index] >> 6) & 0x1;
 		cfg->cea_ycbcr444 = (edid[index] >> 5) & 0x1;
 		cfg->cea_ycbcr422 = (edid[index] >> 4) & 0x1;
-
-		if (cfg->cea_basicaudio) {
-		      cfg->sample_rates[0] = 0x07;
-		      cfg->sample_sizes[0] = 0x01;
-		}
 
 		DPRINTK("CEA underscan %d\n", cfg->cea_underscan);
 		DPRINTK("CEA basicaudio %d\n", cfg->cea_basicaudio);
@@ -556,10 +510,13 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 				}
 			case 0x1: /*Audio data block*/
 				{
-					u8 audio_format, byte1, byte2, byte3;
-					int ch_idx;
+					u8 audio_format, max_ch, byte1, byte2, byte3;
 
 					i = 0;
+					cfg->max_channels = 0;
+					cfg->sample_rates = 0;
+					cfg->sample_sizes = 0;
+
 					while (i < blklen) {
 						byte1 = edid[index + 1];
 						byte2 = edid[index + 2];
@@ -568,18 +525,20 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 						i += 3;
 
 						audio_format = byte1 >> 3;
+						max_ch = (byte1 & 0x07) + 1;
 
 						DPRINTK("Audio Format Descriptor : %2d\n", audio_format);
-						DPRINTK("Max Number of Channels  : %2d\n", (byte1 & 0x07) + 1);
+						DPRINTK("Max Number of Channels  : %2d\n", max_ch);
 						DPRINTK("Sample Rates            : %02x\n", byte2);
 
 						/* ALSA can't specify specific compressed
 						 * formats, so only care about PCM for now. */
 						if (audio_format == AUDIO_CODING_TYPE_LPCM) {
-							for (ch_idx = (byte1 & 0x07) / 2; ch_idx >= 0; ch_idx--) {
-								cfg->sample_rates[ch_idx] |= byte2;
-								cfg->sample_sizes[ch_idx] |= byte3 & 0x7;
-							}
+							if (max_ch > cfg->max_channels)
+								cfg->max_channels = max_ch;
+
+							cfg->sample_rates |= byte2;
+							cfg->sample_sizes |= byte3 & 0x7;
 							DPRINTK("Sample Sizes            : %02x\n",
 								byte3 & 0x7);
 						}
@@ -598,22 +557,6 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 					break;
 				}
 			case 0x7: /*User extended block*/
-				if (blklen >= 2 && edid[index + 1] == 0) {	/*Video Capability Data Block*/
-					u8 data = edid[index + 2];
-
-					cfg->cea_scan_mode_ce = (data >> 0) & 3;
-					cfg->cea_scan_mode_it = (data >> 2) & 3;
-					cfg->cea_scan_mode_pt = (data >> 4) & 3;
-					cfg->cea_rgb_range_selectable = (data >> 6) & 1;
-
-					DPRINTK("VCDB over/underscan behavior (CE)  %d\n", cfg->cea_scan_mode_ce);
-					DPRINTK("VCDB over/underscan behavior (IT)  %d\n", cfg->cea_scan_mode_it);
-					DPRINTK("VCDB over/underscan behavior (PT)  %d\n", cfg->cea_scan_mode_pt);
-					DPRINTK("VCDB RGB quant. range selectable   %d\n", cfg->cea_rgb_range_selectable);
-
-					index += blklen;
-					break;
-				}
 			default:
 				/* skip */
 				DPRINTK("Not handle block, tagcode = 0x%x\n", tagcode);
@@ -645,10 +588,8 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 
 	m = kmalloc((num + specs->modedb_len) *
 			sizeof(struct fb_videomode), GFP_KERNEL);
-	if (!m) {
-		kfree(mode);
+	if (!m)
 		return 0;
-	}
 
 	if (specs->modedb_len) {
 		memmove(m, specs->modedb,
@@ -665,29 +606,6 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
 	return 0;
 }
 EXPORT_SYMBOL(mxc_edid_parse_ext_blk);
-
-unsigned char *override_edid;
-
-void mxc_set_edid_address(unsigned char *edid)
-{
-	pr_debug("%s: edid=%p\n", __func__, edid);
-	override_edid = edid;
-}
-EXPORT_SYMBOL(mxc_set_edid_address);
-
-static int mxc_edid_override(struct i2c_adapter *adp,
-		unsigned short addr, unsigned char *edid)
-{
-	int extblknum = 0;
-	unsigned char *slim_edid = override_edid;
-	memcpy(edid, slim_edid, EDID_LENGTH);
-
-	pr_debug("%s: for slim\n", __func__);
-	extblknum = edid[0x7E];
-	if (extblknum)
-		memcpy(edid + EDID_LENGTH, slim_edid + EDID_LENGTH, EDID_LENGTH);
-	return extblknum;
-}
 
 static int mxc_edid_readblk(struct i2c_adapter *adp,
 		unsigned short addr, unsigned char *edid)
@@ -707,9 +625,6 @@ static int mxc_edid_readblk(struct i2c_adapter *adp,
 		.buf	= edid,
 		},
 	};
-
-	if (override_edid)
-		return mxc_edid_override(adp, addr, edid);
 
 	ret = i2c_transfer(adp, msg, ARRAY_SIZE(msg));
 	if (ret != ARRAY_SIZE(msg)) {
@@ -861,51 +776,4 @@ int mxc_edid_read(struct i2c_adapter *adp, unsigned short addr,
 	return 0;
 }
 EXPORT_SYMBOL(mxc_edid_read);
-
-const struct fb_videomode *mxc_fb_find_nearest_mode(const struct fb_videomode *mode,
-						    struct list_head *head, bool relax)
-{
-	struct list_head *pos;
-	struct fb_modelist *modelist;
-	struct fb_videomode *cmode;
-	static struct fb_videomode *best;
-	static u32 diff, diff_refresh;
-	u32 mask = relax ? FB_VMODE_MASK_SIMPLE | FB_VMODE_ASPECT_MASK : ~0;
-
-	if (!relax) {
-		diff = -1;
-		diff_refresh = -1;
-		best = NULL;
-	}
-
-	list_for_each(pos, head) {
-		u32 d;
-
-		modelist = list_entry(pos, struct fb_modelist, list);
-		cmode = &modelist->mode;
-
-		if ((mode->vmode ^ cmode->vmode) & mask)
-				continue;
-
-		d = abs(cmode->xres - mode->xres) +
-			abs(cmode->yres - mode->yres);
-		if (diff > d) {
-			diff = d;
-			diff_refresh = abs(cmode->refresh - mode->refresh);
-			best = cmode;
-		} else if (diff == d) {
-			d = abs(cmode->refresh - mode->refresh);
-			if (diff_refresh > d) {
-				diff_refresh = d;
-				best = cmode;
-			}
-		}
-	}
-
-	if ((!relax && (diff_refresh || diff)) || !best)
-		mxc_fb_find_nearest_mode(mode, head, true);
-
-	return best;
-}
-EXPORT_SYMBOL(mxc_fb_find_nearest_mode);
 

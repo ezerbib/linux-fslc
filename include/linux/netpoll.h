@@ -87,21 +87,9 @@ static inline void netpoll_send_skb(struct netpoll *np, struct sk_buff *skb)
 #ifdef CONFIG_NETPOLL
 static inline bool netpoll_rx_on(struct sk_buff *skb)
 {
-	struct netpoll_info *npinfo;
-	bool ret;
+	struct netpoll_info *npinfo = rcu_dereference_bh(skb->dev->npinfo);
 
-#ifdef CONFIG_PREEMPT_RT_FULL
-	rcu_read_lock_bh();
-#endif
-
-	npinfo = rcu_dereference_bh(skb->dev->npinfo);
-	ret = npinfo && (!list_empty(&npinfo->rx_np) || npinfo->rx_flags);
-
-#ifdef CONFIG_PREEMPT_RT_FULL
-	rcu_read_unlock_bh();
-#endif
-
-	return ret;
+	return npinfo && (!list_empty(&npinfo->rx_np) || npinfo->rx_flags);
 }
 
 static inline bool netpoll_rx(struct sk_buff *skb)

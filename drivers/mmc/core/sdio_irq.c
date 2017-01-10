@@ -90,15 +90,6 @@ static int process_sdio_pending_irqs(struct mmc_host *host)
 	return ret;
 }
 
-void sdio_run_irqs(struct mmc_host *host)
-{
-	mmc_claim_host(host);
-	host->sdio_irq_pending = true;
-	process_sdio_pending_irqs(host);
-	mmc_release_host(host);
-}
-EXPORT_SYMBOL_GPL(sdio_run_irqs);
-
 static int sdio_irq_thread(void *_host)
 {
 	struct mmc_host *host = _host;
@@ -198,20 +189,14 @@ static int sdio_card_irq_get(struct mmc_card *card)
 	WARN_ON(!host->claimed);
 
 	if (!host->sdio_irqs++) {
-		if (!(host->caps2 & MMC_CAP2_SDIO_IRQ_NOTHREAD)) {
-			atomic_set(&host->sdio_irq_thread_abort, 0);
-			host->sdio_irq_thread =
-				kthread_run(sdio_irq_thread, host,
-					    "ksdioirqd/%s", mmc_hostname(host));
-			if (IS_ERR(host->sdio_irq_thread)) {
-				int err = PTR_ERR(host->sdio_irq_thread);
-				host->sdio_irqs--;
-				return err;
-			}
-		} else if (host->caps & MMC_CAP_SDIO_IRQ) {
-			mmc_host_clk_hold(host);
-			host->ops->enable_sdio_irq(host, 1);
-			mmc_host_clk_release(host);
+		atomic_set(&host->sdio_irq_thread_abort, 0);
+		host->sdio_irq_thread =
+			kthread_run(sdio_irq_thread, host, "ksdioirqd/%s",
+				mmc_hostname(host));
+		if (IS_ERR(host->sdio_irq_thread)) {
+			int err = PTR_ERR(host->sdio_irq_thread);
+			host->sdio_irqs--;
+			return err;
 		}
 	}
 
@@ -226,14 +211,8 @@ static int sdio_card_irq_put(struct mmc_card *card)
 	BUG_ON(host->sdio_irqs < 1);
 
 	if (!--host->sdio_irqs) {
-		if (!(host->caps2 & MMC_CAP2_SDIO_IRQ_NOTHREAD)) {
-			atomic_set(&host->sdio_irq_thread_abort, 1);
-			kthread_stop(host->sdio_irq_thread);
-		} else if (host->caps & MMC_CAP_SDIO_IRQ) {
-			mmc_host_clk_hold(host);
-			host->ops->enable_sdio_irq(host, 0);
-			mmc_host_clk_release(host);
-		}
+		atomic_set(&host->sdio_irq_thread_abort, 1);
+		kthread_stop(host->sdio_irq_thread);
 	}
 
 	return 0;

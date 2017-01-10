@@ -842,7 +842,7 @@ static int flexcan_chip_start(struct net_device *dev)
 {
 	struct flexcan_priv *priv = netdev_priv(dev);
 	struct flexcan_regs __iomem *regs = priv->base;
-	int err;
+	int err, i;
 	u32 reg_mcr, reg_ctrl;
 
 	/* enable module */
@@ -910,8 +910,9 @@ static int flexcan_chip_start(struct net_device *dev)
 	flexcan_write(reg_ctrl, &regs->ctrl);
 
 	/* Abort any pending TX, mark Mailbox as INACTIVE */
-	flexcan_write(FLEXCAN_MB_CNT_CODE(0x4),
-		      &regs->cantxfg[FLEXCAN_TX_BUF_ID].can_ctrl);
+	for (i = FLEXCAN_RESERVED_BUF_ID; i <= FLEXCAN_TX_BUF_ID; i++)
+		flexcan_write(FLEXCAN_MB_CNT_CODE(0x4),
+			      &regs->cantxfg[i].can_ctrl);
 
 	/* acceptance mask/acceptance code (accept everything) */
 	flexcan_write(0x0, &regs->rxgmask);
@@ -1323,7 +1324,6 @@ static int flexcan_suspend(struct device *device)
 {
 	struct net_device *dev = dev_get_drvdata(device);
 	struct flexcan_priv *priv = netdev_priv(dev);
-	int err = 0;
 
 	if (netif_running(dev)) {
 		netif_stop_queue(dev);
@@ -1336,12 +1336,14 @@ static int flexcan_suspend(struct device *device)
 			enable_irq_wake(dev->irq);
 			flexcan_enter_stop_mode(priv);
 		} else {
-			err = flexcan_chip_disable(priv);
+			flexcan_chip_stop(dev);
 		}
 	}
 	priv->can.state = CAN_STATE_SLEEPING;
 
-	return err;
+	pinctrl_pm_select_sleep_state(device);
+
+	return 0;
 }
 
 static int flexcan_resume(struct device *device)
@@ -1349,6 +1351,8 @@ static int flexcan_resume(struct device *device)
 	struct net_device *dev = dev_get_drvdata(device);
 	struct flexcan_priv *priv = netdev_priv(dev);
 	int err = 0;
+
+	pinctrl_pm_select_default_state(device);
 
 	priv->can.state = CAN_STATE_ERROR_ACTIVE;
 	if (netif_running(dev)) {
@@ -1358,9 +1362,9 @@ static int flexcan_resume(struct device *device)
 		if (device_may_wakeup(device)) {
 			disable_irq_wake(dev->irq);
 			flexcan_exit_stop_mode(priv);
-		} else {
-			err = flexcan_chip_enable(priv);
 		}
+
+		err = flexcan_chip_start(dev);
 	}
 
 	return err;

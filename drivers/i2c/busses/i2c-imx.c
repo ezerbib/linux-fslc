@@ -261,34 +261,15 @@ static int i2c_imx_bus_busy(struct imx_i2c_struct *i2c_imx, int for_busy)
 {
 	unsigned long orig_jiffies = jiffies;
 	unsigned int temp;
-	int successes = 0;
 
 	dev_dbg(&i2c_imx->adapter.dev, "<%s>\n", __func__);
 
 	while (1) {
 		temp = imx_i2c_read_reg(i2c_imx, IMX_I2C_I2SR);
-		
-		/* check for arbitration lost */
-		if (temp & I2SR_IAL) {
-			temp &= ~I2SR_IAL;
-			imx_i2c_write_reg(temp, i2c_imx, IMX_I2C_I2SR);
-			return -EAGAIN;
-		}
-
-		if (for_busy) {
-			if (temp & I2SR_IBB) {
-				if (successes++ > 2)
-					break;
-			} else
-				successes = 0 ;
-		}
-		if (!for_busy) {
-			if (!(temp & I2SR_IBB)) {
-				if (successes++ > 2)
-					break;
-			} else
-				successes = 0 ;
-		}
+		if (for_busy && (temp & I2SR_IBB))
+			break;
+		if (!for_busy && !(temp & I2SR_IBB))
+			break;
 		if (time_after(jiffies, orig_jiffies + msecs_to_jiffies(500))) {
 			dev_dbg(&i2c_imx->adapter.dev,
 				"<%s> I2C bus is busy\n", __func__);
@@ -672,8 +653,6 @@ static int i2c_imx_probe(struct platform_device *pdev)
 	i2c_imx->adapter.algo		= &i2c_imx_algo;
 	i2c_imx->adapter.dev.parent	= &pdev->dev;
 	i2c_imx->adapter.nr 		= pdev->id;
-	i2c_imx->adapter.retries 	= 500;
-	i2c_imx->adapter.timeout	= msecs_to_jiffies(2000);
 	i2c_imx->adapter.dev.of_node	= pdev->dev.of_node;
 	i2c_imx->base			= base;
 
@@ -690,8 +669,8 @@ static int i2c_imx_probe(struct platform_device *pdev)
 		return ret;
 	}
 	/* Request IRQ */
-	ret = devm_request_irq(&pdev->dev, irq, i2c_imx_isr, 0,
-				pdev->name, i2c_imx);
+	ret = devm_request_irq(&pdev->dev, irq, i2c_imx_isr,
+			       IRQF_NO_SUSPEND, pdev->name, i2c_imx);
 	if (ret) {
 		dev_err(&pdev->dev, "can't claim irq %d\n", irq);
 		return ret;
@@ -756,13 +735,33 @@ static int i2c_imx_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
+static int i2c_imx_suspend(struct device *dev)
+{
+	pinctrl_pm_select_sleep_state(dev);
+	return 0;
+}
+
+static int i2c_imx_resume(struct device *dev)
+{
+	pinctrl_pm_select_default_state(dev);
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(imx_i2c_pm, i2c_imx_suspend, i2c_imx_resume);
+#define IMX_I2C_PM	(&imx_i2c_pm)
+#else
+#define IMX_I2C_PM	NULL
+#endif
+
 static struct platform_driver i2c_imx_driver = {
 	.probe = i2c_imx_probe,
 	.remove = i2c_imx_remove,
 	.driver	= {
-		.name	= DRIVER_NAME,
-		.owner	= THIS_MODULE,
+		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = i2c_imx_dt_ids,
+		.pm = IMX_I2C_PM,
 	},
 	.id_table	= imx_i2c_devtype,
 };

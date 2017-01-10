@@ -365,8 +365,8 @@ static struct reg_default wm8962_reg[] = {
 	{ 16924, 0x0059 },   /* R16924 - HDBASS_PG_1 */
 	{ 16925, 0x999A },   /* R16925 - HDBASS_PG_0 */
 
-	{ 17048, 0x0083 },   /* R17408 - HPF_C_1 */
-	{ 17049, 0x98AD },   /* R17409 - HPF_C_0 */
+	{ 17408, 0x0083 },   /* R17408 - HPF_C_1 */
+	{ 17409, 0x98AD },   /* R17409 - HPF_C_0 */
 
 	{ 17920, 0x007F },   /* R17920 - ADCL_RETUNE_C1_1 */
 	{ 17921, 0xFFFF },   /* R17921 - ADCL_RETUNE_C1_0 */
@@ -1782,8 +1782,11 @@ SND_SOC_BYTES("HD Bass Coefficients", WM8962_HDBASS_AI_1, 30),
 
 SOC_DOUBLE("ALC Switch", WM8962_ALC1, WM8962_ALCL_ENA_SHIFT,
 		WM8962_ALCR_ENA_SHIFT, 1, 0),
-SND_SOC_BYTES_MASK("ALC Coefficients", WM8962_ALC1, 4,
+SND_SOC_BYTES_MASK("ALC1", WM8962_ALC1, 1,
 		WM8962_ALCL_ENA_MASK | WM8962_ALCR_ENA_MASK),
+SND_SOC_BYTES("ALC2", WM8962_ALC2, 1),
+SND_SOC_BYTES("ALC3", WM8962_ALC3, 1),
+SND_SOC_BYTES("Noise Gate", WM8962_NOISE_GATE, 1),
 };
 
 static const struct snd_kcontrol_new wm8962_spk_mono_controls[] = {

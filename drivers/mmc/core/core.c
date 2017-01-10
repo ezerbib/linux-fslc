@@ -13,14 +13,12 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
-#include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/of.h>
 #include <linux/pagemap.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
 #include <linux/leds.h>
 #include <linux/scatterlist.h>
 #include <linux/log2.h>
@@ -1437,20 +1435,18 @@ int mmc_set_signal_voltage(struct mmc_host *host, int signal_voltage, u32 ocr)
 		pr_warning("%s: cannot verify signal voltage switch\n",
 				mmc_hostname(host));
 
-	mmc_host_clk_hold(host);
-
 	cmd.opcode = SD_SWITCH_VOLTAGE;
 	cmd.arg = 0;
 	cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
 
 	err = mmc_wait_for_cmd(host, &cmd, 0);
 	if (err)
-		goto err_command;
+		return err;
 
-	if (!mmc_host_is_spi(host) && (cmd.resp[0] & R1_ERROR)) {
-		err = -EIO;
-		goto err_command;
-	}
+	if (!mmc_host_is_spi(host) && (cmd.resp[0] & R1_ERROR))
+		return -EIO;
+
+	mmc_host_clk_hold(host);
 	/*
 	 * The card should drive cmd and dat[0:3] low immediately
 	 * after the response of cmd11, but wait 1 ms to be sure
@@ -1499,7 +1495,6 @@ power_cycle:
 		mmc_power_cycle(host, ocr);
 	}
 
-err_command:
 	mmc_host_clk_release(host);
 
 	return err;
@@ -1527,43 +1522,6 @@ void mmc_set_driver_type(struct mmc_host *host, unsigned int drv_type)
 	mmc_host_clk_release(host);
 }
 
-static void mmc_card_power_up(struct mmc_host *host)
-{
-	int i;
-	struct gpio_desc **gds = host->card_reset_gpios;
-
-	for (i = 0; i < ARRAY_SIZE(host->card_reset_gpios); i++) {
-		if (gds[i]) {
-			dev_dbg(host->parent, "Asserting reset line %d", i);
-			gpiod_set_value(gds[i], 1);
-		}
-	}
-
-	if (host->card_regulator) {
-		dev_dbg(host->parent, "Enabling external regulator");
-		if (regulator_enable(host->card_regulator))
-			dev_err(host->parent, "Failed to enable external regulator");
-	}
-
-	if (host->card_clk) {
-		dev_dbg(host->parent, "Enabling external clock");
-		clk_prepare_enable(host->card_clk);
-	}
-
-	/* 2ms delay to let clocks and power settle */
-	mmc_delay(20);
-
-	for (i = 0; i < ARRAY_SIZE(host->card_reset_gpios); i++) {
-		if (gds[i]) {
-			dev_dbg(host->parent, "Deasserting reset line %d", i);
-			gpiod_set_value(gds[i], 0);
-		}
-	}
-
-	/* 2ms delay to after reset release */
-	mmc_delay(20);
-}
-
 /*
  * Apply power to the MMC stack.  This is a two-stage process.
  * First, we enable power to the card without the clock running.
@@ -1579,9 +1537,6 @@ void mmc_power_up(struct mmc_host *host, u32 ocr)
 {
 	if (host->ios.power_mode == MMC_POWER_ON)
 		return;
-
-	/* Power up the card/module first, if needed */
-	mmc_card_power_up(host);
 
 	mmc_host_clk_hold(host);
 
@@ -1652,7 +1607,7 @@ void mmc_power_cycle(struct mmc_host *host, u32 ocr)
 {
 	mmc_power_off(host);
 	/* Wait at least 1 ms according to SD spec */
-	mmc_delay(3);
+	mmc_delay(1);
 	mmc_power_up(host, ocr);
 }
 
@@ -2054,7 +2009,6 @@ int mmc_erase(struct mmc_card *card, unsigned int from, unsigned int nr,
 	      unsigned int arg)
 {
 	unsigned int rem, to = from + nr;
-	int err;
 
 	if (!(card->host->caps & MMC_CAP_ERASE) ||
 	    !(card->csd.cmdclass & CCC_ERASE))
@@ -2104,23 +2058,6 @@ int mmc_erase(struct mmc_card *card, unsigned int from, unsigned int nr,
 
 	/* 'from' and 'to' are inclusive */
 	to -= 1;
-
-	/*
-	 * Special case where only one erase-group fits in the timeout budget:
-	 * If the region crosses an erase-group boundary on this particular
-	 * case, we will be trimming more than one erase-group which, does not
-	 * fit in the timeout budget of the controller, so we need to split it
-	 * and call mmc_do_erase() twice if necessary. This special case is
-	 * identified by the card->eg_boundary flag.
-	 */
-	if ((arg & MMC_TRIM_ARGS) && (card->eg_boundary) &&
-	    (from % card->erase_size)) {
-		rem = card->erase_size - (from % card->erase_size);
-		err = mmc_do_erase(card, from, from + rem - 1, arg);
-		from += rem;
-		if ((err) || (to <= from))
-			return err;
-	}
 
 	return mmc_do_erase(card, from, to, arg);
 }
@@ -2203,7 +2140,7 @@ static unsigned int mmc_do_calc_max_discard(struct mmc_card *card,
 		y = 0;
 		for (x = 1; x && x <= max_qty && max_qty - x >= qty; x <<= 1) {
 			timeout = mmc_erase_timeout(card, arg, qty + x);
-			if (timeout > host->max_discard_to)
+			if (timeout > host->max_busy_timeout)
 				break;
 			if (timeout < last_timeout)
 				break;
@@ -2216,28 +2153,16 @@ static unsigned int mmc_do_calc_max_discard(struct mmc_card *card,
 	if (!qty)
 		return 0;
 
-	/*
-	 * When specifying a sector range to trim, chances are we might cross
-	 * an erase-group boundary even if the amount of sectors is less than
-	 * one erase-group.
-	 * If we can only fit one erase-group in the controller timeout budget,
-	 * we have to care that erase-group boundaries are not crossed by a
-	 * single trim operation. We flag that special case with "eg_boundary".
-	 * In all other cases we can just decrement qty and pretend that we
-	 * always touch (qty + 1) erase-groups as a simple optimization.
-	 */
 	if (qty == 1)
-		card->eg_boundary = 1;
-	else
-		qty--;
+		return 1;
 
 	/* Convert qty to sectors */
 	if (card->erase_shift)
-		max_discard = qty << card->erase_shift;
+		max_discard = --qty << card->erase_shift;
 	else if (mmc_card_sd(card))
-		max_discard = qty + 1;
+		max_discard = qty;
 	else
-		max_discard = qty * card->erase_size;
+		max_discard = --qty * card->erase_size;
 
 	return max_discard;
 }
@@ -2247,7 +2172,7 @@ unsigned int mmc_calc_max_discard(struct mmc_card *card)
 	struct mmc_host *host = card->host;
 	unsigned int max_discard, max_trim;
 
-	if (!host->max_discard_to)
+	if (!host->max_busy_timeout)
 		return UINT_MAX;
 
 	/*
@@ -2267,7 +2192,7 @@ unsigned int mmc_calc_max_discard(struct mmc_card *card)
 		max_discard = 0;
 	}
 	pr_debug("%s: calculated max. discard sectors %u for timeout %u ms\n",
-		 mmc_hostname(host), max_discard, host->max_discard_to);
+		 mmc_hostname(host), max_discard, host->max_busy_timeout);
 	return max_discard;
 }
 EXPORT_SYMBOL(mmc_calc_max_discard);
@@ -2800,6 +2725,7 @@ int mmc_first_nonreserved_index(void)
 {
 	return __mmc_max_reserved_idx + 1;
 }
+EXPORT_SYMBOL(mmc_first_nonreserved_index);
 
 /**
  * mmc_get_reserved_index() - get the index reserved for this host
@@ -2811,6 +2737,7 @@ int mmc_get_reserved_index(struct mmc_host *host)
 {
 	return of_alias_get_id(host->parent->of_node, "mmc");
 }
+EXPORT_SYMBOL(mmc_get_reserved_index);
 
 static void mmc_of_reserve_idx(void)
 {

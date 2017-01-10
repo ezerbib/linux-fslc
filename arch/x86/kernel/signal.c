@@ -682,12 +682,15 @@ handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	signal_setup_done(failed, ksig, test_thread_flag(TIF_SINGLESTEP));
 }
 
-#ifdef CONFIG_X86_32
-#define NR_restart_syscall	__NR_restart_syscall
-#else /* !CONFIG_X86_32 */
-#define NR_restart_syscall	\
-	test_thread_flag(TIF_IA32) ? __NR_ia32_restart_syscall : __NR_restart_syscall
-#endif /* CONFIG_X86_32 */
+static inline unsigned long get_nr_restart_syscall(const struct pt_regs *regs)
+{
+#if defined(CONFIG_X86_32) || !defined(CONFIG_X86_64)
+	return __NR_restart_syscall;
+#else /* !CONFIG_X86_32 && CONFIG_X86_64 */
+	return test_thread_flag(TIF_IA32) ? __NR_ia32_restart_syscall :
+		__NR_restart_syscall | (regs->orig_ax & __X32_SYSCALL_BIT);
+#endif /* CONFIG_X86_32 || !CONFIG_X86_64 */
+}
 
 /*
  * Note that 'init' is a special process: it doesn't get signals it doesn't
@@ -716,7 +719,7 @@ static void do_signal(struct pt_regs *regs)
 			break;
 
 		case -ERESTART_RESTARTBLOCK:
-			regs->ax = NR_restart_syscall;
+			regs->ax = get_nr_restart_syscall(regs);
 			regs->ip -= 2;
 			break;
 		}
@@ -743,14 +746,6 @@ do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
 	if (thread_info_flags & _TIF_MCE_NOTIFY)
 		mce_notify_process();
 #endif /* CONFIG_X86_64 && CONFIG_X86_MCE */
-
-#ifdef ARCH_RT_DELAYS_SIGNAL_SEND
-	if (unlikely(current->forced_info.si_signo)) {
-		struct task_struct *t = current;
-		force_sig_info(t->forced_info.si_signo,	&t->forced_info, t);
-		t->forced_info.si_signo = 0;
-	}
-#endif
 
 	if (thread_info_flags & _TIF_UPROBE)
 		uprobe_notify_resume(regs);

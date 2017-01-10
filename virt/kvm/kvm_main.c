@@ -219,7 +219,7 @@ int kvm_vcpu_init(struct kvm_vcpu *vcpu, struct kvm *kvm, unsigned id)
 	vcpu->kvm = kvm;
 	vcpu->vcpu_id = id;
 	vcpu->pid = NULL;
-	init_swait_head(&vcpu->wq);
+	init_waitqueue_head(&vcpu->wq);
 	kvm_async_pf_vcpu_init(vcpu);
 
 	page = alloc_page(GFP_KERNEL | __GFP_ZERO);
@@ -454,6 +454,16 @@ static struct kvm *kvm_create_vm(unsigned long type)
 	if (!kvm)
 		return ERR_PTR(-ENOMEM);
 
+	spin_lock_init(&kvm->mmu_lock);
+	atomic_inc(&current->mm->mm_count);
+	kvm->mm = current->mm;
+	kvm_eventfd_init(kvm);
+	mutex_init(&kvm->lock);
+	mutex_init(&kvm->irq_lock);
+	mutex_init(&kvm->slots_lock);
+	atomic_set(&kvm->users_count, 1);
+	INIT_LIST_HEAD(&kvm->devices);
+
 	r = kvm_arch_init_vm(kvm, type);
 	if (r)
 		goto out_err_nodisable;
@@ -483,16 +493,6 @@ static struct kvm *kvm_create_vm(unsigned long type)
 			goto out_err;
 	}
 
-	spin_lock_init(&kvm->mmu_lock);
-	kvm->mm = current->mm;
-	atomic_inc(&kvm->mm->mm_count);
-	kvm_eventfd_init(kvm);
-	mutex_init(&kvm->lock);
-	mutex_init(&kvm->irq_lock);
-	mutex_init(&kvm->slots_lock);
-	atomic_set(&kvm->users_count, 1);
-	INIT_LIST_HEAD(&kvm->devices);
-
 	r = kvm_init_mmu_notifier(kvm);
 	if (r)
 		goto out_err;
@@ -512,6 +512,7 @@ out_err_nodisable:
 		kfree(kvm->buses[i]);
 	kfree(kvm->memslots);
 	kvm_arch_free_vm(kvm);
+	mmdrop(current->mm);
 	return ERR_PTR(r);
 }
 
@@ -1675,10 +1676,10 @@ EXPORT_SYMBOL_GPL(mark_page_dirty);
  */
 void kvm_vcpu_block(struct kvm_vcpu *vcpu)
 {
-	DEFINE_SWAITER(wait);
+	DEFINE_WAIT(wait);
 
 	for (;;) {
-		swait_prepare(&vcpu->wq, &wait, TASK_INTERRUPTIBLE);
+		prepare_to_wait(&vcpu->wq, &wait, TASK_INTERRUPTIBLE);
 
 		if (kvm_arch_vcpu_runnable(vcpu)) {
 			kvm_make_request(KVM_REQ_UNHALT, vcpu);
@@ -1692,7 +1693,7 @@ void kvm_vcpu_block(struct kvm_vcpu *vcpu)
 		schedule();
 	}
 
-	swait_finish(&vcpu->wq, &wait);
+	finish_wait(&vcpu->wq, &wait);
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_block);
 
@@ -1704,11 +1705,11 @@ void kvm_vcpu_kick(struct kvm_vcpu *vcpu)
 {
 	int me;
 	int cpu = vcpu->cpu;
-	struct swait_head *wqp;
+	wait_queue_head_t *wqp;
 
 	wqp = kvm_arch_vcpu_wq(vcpu);
-	if (swaitqueue_active(wqp)) {
-		swait_wake_interruptible(wqp);
+	if (waitqueue_active(wqp)) {
+		wake_up_interruptible(wqp);
 		++vcpu->stat.halt_wakeup;
 	}
 
@@ -1814,7 +1815,7 @@ void kvm_vcpu_on_spin(struct kvm_vcpu *me)
 				continue;
 			if (vcpu == me)
 				continue;
-			if (swaitqueue_active(&vcpu->wq))
+			if (waitqueue_active(&vcpu->wq))
 				continue;
 			if (!kvm_vcpu_eligible_for_directed_yield(vcpu))
 				continue;

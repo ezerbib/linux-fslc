@@ -164,8 +164,8 @@ static void __init eva_init(void)
 	r8a7740_meram_workaround();
 
 #ifdef CONFIG_CACHE_L2X0
-	/* Shared attribute override enable, 32K*8way */
-	l2x0_init(IOMEM(0xf0002000), 0x00400000, 0xc20f0fff);
+	/* Early BRESP enable, Shared attribute override enable, 32K*8way */
+	l2x0_init(IOMEM(0xf0002000), 0x40440000, 0x82000fff);
 #endif
 
 	r8a7740_add_standard_devices_dt();

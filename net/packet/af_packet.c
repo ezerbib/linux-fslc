@@ -63,7 +63,6 @@
 #include <linux/if_packet.h>
 #include <linux/wireless.h>
 #include <linux/kernel.h>
-#include <linux/delay.h>
 #include <linux/kmod.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
@@ -702,7 +701,7 @@ static void prb_retire_rx_blk_timer_expired(unsigned long data)
 	if (BLOCK_NUM_PKTS(pbd)) {
 		while (atomic_read(&pkc->blk_fill_in_prog)) {
 			/* Waiting for skb_copy_bits to finish... */
-			cpu_chill();
+			cpu_relax();
 		}
 	}
 
@@ -953,7 +952,7 @@ static void prb_retire_current_block(struct tpacket_kbdq_core *pkc,
 		if (!(status & TP_STATUS_BLK_TMO)) {
 			while (atomic_read(&pkc->blk_fill_in_prog)) {
 				/* Waiting for skb_copy_bits to finish... */
-				cpu_chill();
+				cpu_relax();
 			}
 		}
 		prb_close_block(pkc, pbd, po, status);
@@ -3154,6 +3153,7 @@ static int packet_mc_add(struct sock *sk, struct packet_mreq_max *mreq)
 	i->ifindex = mreq->mr_ifindex;
 	i->alen = mreq->mr_alen;
 	memcpy(i->addr, mreq->mr_address, i->alen);
+	memset(i->addr + i->alen, 0, sizeof(i->addr) - i->alen);
 	i->count = 1;
 	i->next = po->mclist;
 	po->mclist = i;

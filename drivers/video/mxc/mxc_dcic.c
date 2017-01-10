@@ -59,11 +59,6 @@
 #define FB_SYNC_OE_LOW_ACT		0x80000000
 #define FB_SYNC_CLK_LAT_FALL	0x40000000
 
-static wait_queue_head_t mxc_dcic_wait;
-static int mxc_dcic_vsync;
-static int mxc_dcic_irq;
-static unsigned long mxc_dcic_counter;
-
 static const struct dcic_mux imx6q_dcic0_mux[] = {
 	{
 		.dcic = DCIC_IPU1_DI0,
@@ -243,13 +238,13 @@ static bool roi_configure(struct dcic_data *dcic, struct roi_params *roi_param)
 	u32 val;
 
 	if (roi_param->roi_n < 0 || roi_param->roi_n >= 16) {
-		pr_err("Error, Wrong ROI number %d\n", roi_param->roi_n);
+		printk(KERN_ERR "Error, Wrong ROI number %d\n", roi_param->roi_n);
 		return false;
 	}
 
 	if (roi_param->end_x <= roi_param->start_x ||
 			roi_param->end_y <= roi_param->start_y) {
-		pr_err("Error, Wrong ROI\n");
+		printk(KERN_ERR "Error, Wrong ROI\n");
 		return false;
 	}
 
@@ -302,30 +297,20 @@ static irqreturn_t dcic_irq_handler(int irq, void *data)
 
 	dcic->result = dcics & 0xffff;
 
-	if (!mxc_dcic_vsync)
-		dcic_int_disable(dcic);
-	else {
-		mxc_dcic_irq = 1;
-		mxc_dcic_counter++;
-	}
+	dcic_int_disable(dcic);
 
 	/* clean dcic interrupt state */
 	writel(DCICS_FI_STAT_PENDING, &dcic->regs->dcics);
 	writel(dcics, &dcic->regs->dcics);
 
-	if (mxc_dcic_vsync) {
-		wake_up(&mxc_dcic_wait);
-		return IRQ_HANDLED;
-	}
-
 	for (i = 0; i < 16; i++) {
-		pr_debug("ROI=%d,crcRS=0x%x, crcCS=0x%x\n", i,
+		printk(KERN_INFO "ROI=%d,crcRS=0x%x, crcCS=0x%x\n", i,
 				readl(&dcic->regs->ROI[i].dcicrrs),
 				readl(&dcic->regs->ROI[i].dcicrcs));
 	}
 	complete(&dcic->roi_crc_comp);
 
-	return IRQ_HANDLED;
+	return 0;
 }
 
 static int dcic_configure(struct dcic_data *dcic, unsigned int sync)
@@ -386,7 +371,7 @@ static int dcic_init(struct device_node *np, struct dcic_data *dcic)
 
 	val = of_get_dcic_val(np, dcic);
 	if (val < 0) {
-		pr_err("Error incorrect\n");
+		printk(KERN_ERR "Error incorrect\n");
 		return -1;
 	}
 
@@ -442,64 +427,19 @@ static long dcic_ioctl(struct file *file,
 		}
 		dcic_disable(dcic);
 		break;
-	case DCIC_IOC_START_VSYNC:
-		mxc_dcic_vsync = 1;
-		mxc_dcic_irq = 0;
-		mxc_dcic_counter = 0;
-
-		// configure minimum roi block
-		roi_param.roi_n = 0;
-		roi_param.end_x = 1;
-		roi_param.start_x = 0;
-		roi_param.end_y = 1;
-		roi_param.start_y = 0;
-		roi_configure(dcic, &roi_param);
-
-		dcic_enable(dcic);
-		dcic_int_enable(dcic);
-		break;
-	case DCIC_IOC_STOP_VSYNC:
-		mxc_dcic_vsync = 0;
-		mxc_dcic_irq = 0;
-		init_completion(&dcic->roi_crc_comp);
-		wait_for_completion_interruptible_timeout(&dcic->roi_crc_comp, 1 * HZ);
-		dcic_disable(dcic);
-		break;
 	default:
-		pr_err("%s, Unsupport cmd %d\n", __func__, cmd);
+		printk(KERN_ERR "%s, Unsupport cmd %d\n", __func__, cmd);
 		break;
      }
      return ret;
 }
 
-static ssize_t dcic_read(struct file *file, char __user *buf, size_t count,
-			    loff_t *ppos)
-{
-	int ret = 0;
-
-	do {
-		if (mxc_dcic_irq) {
-			count = min(sizeof(unsigned long), count);
-			ret = copy_to_user(buf, &mxc_dcic_counter, count) ? -EFAULT : count;
-			mxc_dcic_irq = 0;
-			break;
-		}
-		if (file->f_flags & O_NONBLOCK) {
-			ret = -EAGAIN;
-		}
-		else if (wait_event_interruptible(mxc_dcic_wait, mxc_dcic_irq))
-			ret = -ERESTARTSYS;
-	} while(!ret);
-
-	return ret;
-}
 
 static const struct file_operations mxc_dcic_fops = {
 	.owner = THIS_MODULE,
 	.open = dcic_open,
 	.release = dcic_release,
 	.unlocked_ioctl = dcic_ioctl,
-	.read = dcic_read,
 };
 
 static int dcic_probe(struct platform_device *pdev)
@@ -570,7 +510,7 @@ static int dcic_probe(struct platform_device *pdev)
 	mutex_init(&dcic->lock);
 	ret = dcic_init(np, dcic);
 	if (ret < 0) {
-		pr_err("Failed init dcic\n");
+		printk(KERN_ERR "Failed init dcic\n");
 		goto ealloc;
 	}
 
@@ -578,7 +518,7 @@ static int dcic_probe(struct platform_device *pdev)
 	name = dcic->buses[dcic->bus_n].name;
 	dcic->major = register_chrdev(0, name, &mxc_dcic_fops);
 	if (dcic->major < 0) {
-		pr_err("DCIC: unable to get a major for dcic\n");
+		printk(KERN_ERR "DCIC: unable to get a major for dcic\n");
 		ret = -EBUSY;
 		goto ealloc;
 	}
@@ -612,10 +552,6 @@ static int dcic_probe(struct platform_device *pdev)
 				irq, ret);
 		goto err_out_cdev;
 	}
-
-	init_waitqueue_head(&mxc_dcic_wait);
-	mxc_dcic_vsync = 0;
-	mxc_dcic_irq = 0;
 
 	return 0;
 

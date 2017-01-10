@@ -112,12 +112,6 @@ enum v4l2_if_type {
 	 * on certain image sensors.
 	 */
 	V4L2_IF_TYPE_BT656,
-	V4L2_IF_TYPE_BT1120_PROGRESSIVE_DDR,
-	V4L2_IF_TYPE_BT1120_PROGRESSIVE_SDR,
-	V4L2_IF_TYPE_BT1120_INTERLACED_DDR,
-	V4L2_IF_TYPE_BT1120_INTERLACED_SDR,
-	V4L2_IF_TYPE_BT656_PROGRESSIVE,
-	V4L2_IF_TYPE_BT656_INTERLACED,
 };
 
 enum v4l2_if_type_bt656_mode {
@@ -193,7 +187,6 @@ enum v4l2_int_ioctl_num {
 	vidioc_int_querystd_num,
 	vidioc_int_s_std_num,
 	vidioc_int_s_video_routing_num,
-	vidioc_int_send_command_num,
 
 	/*
 	 *
@@ -227,8 +220,6 @@ enum v4l2_int_ioctl_num {
 	vidioc_int_reset_num,
 	/* VIDIOC_INT_INIT */
 	vidioc_int_init_num,
-	/* VIDIOC_DBG_G_CHIP_IDENT */
-	vidioc_int_g_chip_ident_num,
 
 	/*
 	 *
@@ -298,7 +289,6 @@ V4L2_INT_WRAPPER_1(s_parm, struct v4l2_streamparm, *);
 V4L2_INT_WRAPPER_1(querystd, v4l2_std_id, *);
 V4L2_INT_WRAPPER_1(s_std, v4l2_std_id, *);
 V4L2_INT_WRAPPER_1(s_video_routing, struct v4l2_routing, *);
-V4L2_INT_WRAPPER_1(send_command, struct v4l2_send_command_control, *);
 
 V4L2_INT_WRAPPER_0(dev_init);
 V4L2_INT_WRAPPER_0(dev_exit);
@@ -311,6 +301,5 @@ V4L2_INT_WRAPPER_1(enum_frameintervals, struct v4l2_frmivalenum, *);
 
 V4L2_INT_WRAPPER_0(reset);
 V4L2_INT_WRAPPER_0(init);
-V4L2_INT_WRAPPER_1(g_chip_ident, int, *);
 
 #endif

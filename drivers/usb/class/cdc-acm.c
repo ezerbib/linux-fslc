@@ -350,7 +350,7 @@ static void acm_ctrl_irq(struct urb *urb)
 	}
 exit:
 	retval = usb_submit_urb(urb, GFP_ATOMIC);
-	if (retval && retval != -EPERM)
+	if (retval)
 		dev_err(&acm->control->dev, "%s - usb_submit_urb failed: %d\n",
 							__func__, retval);
 }
@@ -407,31 +407,23 @@ static void acm_read_bulk_callback(struct urb *urb)
 	struct acm_rb *rb = urb->context;
 	struct acm *acm = rb->instance;
 	unsigned long flags;
-	int status = urb->status;
 
 	dev_vdbg(&acm->data->dev, "%s - urb %d, len %d\n", __func__,
 					rb->index, urb->actual_length);
+	set_bit(rb->index, &acm->read_urbs_free);
 
 	if (!acm->dev) {
-		set_bit(rb->index, &acm->read_urbs_free);
 		dev_dbg(&acm->data->dev, "%s - disconnected\n", __func__);
 		return;
 	}
 	usb_mark_last_busy(acm->dev);
 
-	if (status) {
-		set_bit(rb->index, &acm->read_urbs_free);
+	if (urb->status) {
 		dev_dbg(&acm->data->dev, "%s - non-zero urb status: %d\n",
-							__func__, status);
+							__func__, urb->status);
 		return;
 	}
 	acm_process_read_urb(acm, urb);
-	/*
-	 * Unthrottle may run on another CPU which needs to see events
-	 * in the same order. Submission has an implict barrier
-	 */
-	smp_mb__before_clear_bit();
-	set_bit(rb->index, &acm->read_urbs_free);
 
 	/* throttle device if requested by tty */
 	spin_lock_irqsave(&acm->read_lock, flags);
@@ -450,14 +442,13 @@ static void acm_write_bulk(struct urb *urb)
 	struct acm_wb *wb = urb->context;
 	struct acm *acm = wb->instance;
 	unsigned long flags;
-	int status = urb->status;
 
-	if (status || (urb->actual_length != urb->transfer_buffer_length))
+	if (urb->status	|| (urb->actual_length != urb->transfer_buffer_length))
 		dev_vdbg(&acm->data->dev, "%s - len %d/%d, status %d\n",
 			__func__,
 			urb->actual_length,
 			urb->transfer_buffer_length,
-			status);
+			urb->status);
 
 	spin_lock_irqsave(&acm->write_lock, flags);
 	acm_write_done(acm, wb);
@@ -1072,7 +1063,6 @@ static int acm_probe(struct usb_interface *intf,
 	unsigned long quirks;
 	int num_rx_buf;
 	int i;
-	unsigned int elength = 0;
 	int combined_interfaces = 0;
 	struct device *tty_dev;
 	int rv = -ENOMEM;
@@ -1089,6 +1079,9 @@ static int acm_probe(struct usb_interface *intf,
 	if (quirks == NO_UNION_NORMAL) {
 		data_interface = usb_ifnum_to_if(usb_dev, 1);
 		control_interface = usb_ifnum_to_if(usb_dev, 0);
+		/* we would crash */
+		if (!data_interface || !control_interface)
+			return -ENODEV;
 		goto skip_normal_probe;
 	}
 
@@ -1114,12 +1107,6 @@ static int acm_probe(struct usb_interface *intf,
 	}
 
 	while (buflen > 0) {
-		elength = buffer[0];
-		if (!elength) {
-			dev_err(&intf->dev, "skipping garbage byte\n");
-			elength = 1;
-			goto next_desc;
-		}
 		if (buffer[1] != USB_DT_CS_INTERFACE) {
 			dev_err(&intf->dev, "skipping garbage\n");
 			goto next_desc;
@@ -1127,8 +1114,6 @@ static int acm_probe(struct usb_interface *intf,
 
 		switch (buffer[2]) {
 		case USB_CDC_UNION_TYPE: /* we've found it */
-			if (elength < sizeof(struct usb_cdc_union_desc))
-				goto next_desc;
 			if (union_header) {
 				dev_err(&intf->dev, "More than one "
 					"union descriptor, skipping ...\n");
@@ -1137,38 +1122,31 @@ static int acm_probe(struct usb_interface *intf,
 			union_header = (struct usb_cdc_union_desc *)buffer;
 			break;
 		case USB_CDC_COUNTRY_TYPE: /* export through sysfs*/
-			if (elength < sizeof(struct usb_cdc_country_functional_desc))
-				goto next_desc;
 			cfd = (struct usb_cdc_country_functional_desc *)buffer;
 			break;
 		case USB_CDC_HEADER_TYPE: /* maybe check version */
 			break; /* for now we ignore it */
 		case USB_CDC_ACM_TYPE:
-			if (elength < 4)
-				goto next_desc;
 			ac_management_function = buffer[3];
 			break;
 		case USB_CDC_CALL_MANAGEMENT_TYPE:
-			if (elength < 5)
-				goto next_desc;
 			call_management_function = buffer[3];
 			call_interface_num = buffer[4];
 			if ((quirks & NOT_A_MODEM) == 0 && (call_management_function & 3) != 3)
 				dev_err(&intf->dev, "This device cannot do calls on its own. It is not a modem.\n");
 			break;
 		default:
-			/*
-			 * there are LOTS more CDC descriptors that
+			/* there are LOTS more CDC descriptors that
 			 * could legitimately be found here.
 			 */
 			dev_dbg(&intf->dev, "Ignoring descriptor: "
-					"type %02x, length %ud\n",
-					buffer[2], elength);
+					"type %02x, length %d\n",
+					buffer[2], buffer[0]);
 			break;
 		}
 next_desc:
-		buflen -= elength;
-		buffer += elength;
+		buflen -= buffer[0];
+		buffer += buffer[0];
 	}
 
 	if (!union_header) {
@@ -1286,8 +1264,10 @@ made_compressed_probe:
 	dev_dbg(&intf->dev, "interfaces are valid\n");
 
 	acm = kzalloc(sizeof(struct acm), GFP_KERNEL);
-	if (acm == NULL)
+	if (acm == NULL) {
+		dev_err(&intf->dev, "out of memory (acm kzalloc)\n");
 		goto alloc_fail;
+	}
 
 	minor = acm_alloc_minor(acm);
 	if (minor == ACM_TTY_MINORS) {
@@ -1325,32 +1305,42 @@ made_compressed_probe:
 	init_usb_anchor(&acm->delayed);
 
 	buf = usb_alloc_coherent(usb_dev, ctrlsize, GFP_KERNEL, &acm->ctrl_dma);
-	if (!buf)
+	if (!buf) {
+		dev_err(&intf->dev, "out of memory (ctrl buffer alloc)\n");
 		goto alloc_fail2;
+	}
 	acm->ctrl_buffer = buf;
 
-	if (acm_write_buffers_alloc(acm) < 0)
+	if (acm_write_buffers_alloc(acm) < 0) {
+		dev_err(&intf->dev, "out of memory (write buffer alloc)\n");
 		goto alloc_fail4;
+	}
 
 	acm->ctrlurb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!acm->ctrlurb)
+	if (!acm->ctrlurb) {
+		dev_err(&intf->dev, "out of memory (ctrlurb kmalloc)\n");
 		goto alloc_fail5;
-
+	}
 	for (i = 0; i < num_rx_buf; i++) {
 		struct acm_rb *rb = &(acm->read_buffers[i]);
 		struct urb *urb;
 
 		rb->base = usb_alloc_coherent(acm->dev, readsize, GFP_KERNEL,
 								&rb->dma);
-		if (!rb->base)
+		if (!rb->base) {
+			dev_err(&intf->dev, "out of memory "
+					"(read bufs usb_alloc_coherent)\n");
 			goto alloc_fail6;
+		}
 		rb->index = i;
 		rb->instance = acm;
 
 		urb = usb_alloc_urb(0, GFP_KERNEL);
-		if (!urb)
+		if (!urb) {
+			dev_err(&intf->dev,
+				"out of memory (read urbs usb_alloc_urb)\n");
 			goto alloc_fail6;
-
+		}
 		urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 		urb->transfer_dma = rb->dma;
 		if (acm->is_int_ep) {
@@ -1375,8 +1365,11 @@ made_compressed_probe:
 		struct acm_wb *snd = &(acm->wb[i]);
 
 		snd->urb = usb_alloc_urb(0, GFP_KERNEL);
-		if (snd->urb == NULL)
+		if (snd->urb == NULL) {
+			dev_err(&intf->dev,
+				"out of memory (write urbs usb_alloc_urb)\n");
 			goto alloc_fail7;
+		}
 
 		if (usb_endpoint_xfer_int(epwrite))
 			usb_fill_int_urb(snd->urb, usb_dev,
@@ -1819,6 +1812,11 @@ static const struct usb_device_id acm_ids[] = {
 	.driver_info = IGNORE_DEVICE,
 	},
 #endif
+
+	/*Samsung phone in firmware update mode */
+	{ USB_DEVICE(0x04e8, 0x685d),
+	.driver_info = IGNORE_DEVICE,
+	},
 
 	/* Exclude Infineon Flash Loader utility */
 	{ USB_DEVICE(0x058b, 0x0041),

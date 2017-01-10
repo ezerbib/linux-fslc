@@ -74,11 +74,11 @@ static void kvmppc_fast_vcpu_kick_hv(struct kvm_vcpu *vcpu)
 {
 	int me;
 	int cpu = vcpu->cpu;
-	struct swait_head *wqp;
+	wait_queue_head_t *wqp;
 
 	wqp = kvm_arch_vcpu_wq(vcpu);
-	if (swaitqueue_active(wqp)) {
-		swait_wake_interruptible(wqp);
+	if (waitqueue_active(wqp)) {
+		wake_up_interruptible(wqp);
 		++vcpu->stat.halt_wakeup;
 	}
 
@@ -166,6 +166,12 @@ static void kvmppc_core_vcpu_put_hv(struct kvm_vcpu *vcpu)
 
 static void kvmppc_set_msr_hv(struct kvm_vcpu *vcpu, u64 msr)
 {
+	/*
+	 * Check for illegal transactional state bit combination
+	 * and if we find it, force the TS field to a safe state.
+	 */
+	if ((msr & MSR_TS_MASK) == MSR_TS_MASK)
+		msr &= ~MSR_TS_MASK;
 	vcpu->arch.shregs.msr = msr;
 	kvmppc_end_cede(vcpu);
 }
@@ -583,8 +589,8 @@ int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 		tvcpu->arch.prodded = 1;
 		smp_mb();
 		if (vcpu->arch.ceded) {
-			if (swaitqueue_active(&vcpu->wq)) {
-				swait_wake_interruptible(&vcpu->wq);
+			if (waitqueue_active(&vcpu->wq)) {
+				wake_up_interruptible(&vcpu->wq);
 				vcpu->stat.halt_wakeup++;
 			}
 		}
@@ -1199,7 +1205,7 @@ static struct kvm_vcpu *kvmppc_core_vcpu_create_hv(struct kvm *kvm,
 		if (vcore) {
 			INIT_LIST_HEAD(&vcore->runnable_threads);
 			spin_lock_init(&vcore->lock);
-			init_swait_head(&vcore->wq);
+			init_waitqueue_head(&vcore->wq);
 			vcore->preempt_tb = TB_NIL;
 			vcore->lpcr = kvm->arch.lpcr;
 			vcore->first_vcpuid = core * threads_per_core;
@@ -1566,13 +1572,13 @@ static void kvmppc_wait_for_exec(struct kvm_vcpu *vcpu, int wait_state)
  */
 static void kvmppc_vcore_blocked(struct kvmppc_vcore *vc)
 {
-	DEFINE_SWAITER(wait);
+	DEFINE_WAIT(wait);
 
-	swait_prepare(&vc->wq, &wait, TASK_INTERRUPTIBLE);
+	prepare_to_wait(&vc->wq, &wait, TASK_INTERRUPTIBLE);
 	vc->vcore_state = VCORE_SLEEPING;
 	spin_unlock(&vc->lock);
 	schedule();
-	swait_finish(&vc->wq, &wait);
+	finish_wait(&vc->wq, &wait);
 	spin_lock(&vc->lock);
 	vc->vcore_state = VCORE_INACTIVE;
 }
@@ -1613,7 +1619,7 @@ static int kvmppc_run_vcpu(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 			kvmppc_create_dtl_entry(vcpu, vc);
 			kvmppc_start_thread(vcpu);
 		} else if (vc->vcore_state == VCORE_SLEEPING) {
-			swait_wake(&vc->wq);
+			wake_up(&vc->wq);
 		}
 
 	}

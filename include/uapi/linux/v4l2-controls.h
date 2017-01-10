@@ -168,10 +168,6 @@ enum v4l2_colorfx {
  * We reserve 16 controls for this driver. */
 #define V4L2_CID_USER_SAA7134_BASE		(V4L2_CID_USER_BASE + 0x1060)
 
-/* The base for the tc358743 driver controls.
- * We reserve 16 controls for this driver. */
-#define V4L2_CID_USER_TC358743_BASE		(V4L2_CID_USER_BASE + 0x1080)
-
 /* MPEG-class control IDs */
 /* The MPEG controls are applicable to all codec controls
  * and the 'MPEG' part of the define is historical */
@@ -676,14 +672,6 @@ enum  v4l2_exposure_auto_type {
 #define V4L2_CID_AUTO_EXPOSURE_BIAS		(V4L2_CID_CAMERA_CLASS_BASE+19)
 
 #define V4L2_CID_AUTO_N_PRESET_WHITE_BALANCE	(V4L2_CID_CAMERA_CLASS_BASE+20)
-
-/* Backported from Samsung Kernel */
-#define V4L2_CID_AUTO_FOCUS_START		(V4L2_CID_CAMERA_CLASS_BASE+28)
-#define V4L2_CID_AUTO_FOCUS_STOP		(V4L2_CID_CAMERA_CLASS_BASE+29)
-#define V4L2_CID_AUTO_FOCUS_STATUS		(V4L2_CID_CAMERA_CLASS_BASE+30)
-#define V4L2_CID_SEND_COMMAND			(V4L2_CID_CAMERA_CLASS_BASE+34)
-
-
 enum v4l2_auto_n_preset_white_balance {
 	V4L2_WHITE_BALANCE_MANUAL		= 0,
 	V4L2_WHITE_BALANCE_AUTO			= 1,

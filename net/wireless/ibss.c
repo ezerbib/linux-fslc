@@ -14,8 +14,7 @@
 #include "rdev-ops.h"
 
 
-void __cfg80211_ibss_joined(struct net_device *dev, const u8 *bssid,
-			    struct ieee80211_channel *channel)
+void __cfg80211_ibss_joined(struct net_device *dev, const u8 *bssid)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct cfg80211_bss *bss;
@@ -29,7 +28,8 @@ void __cfg80211_ibss_joined(struct net_device *dev, const u8 *bssid,
 	if (!wdev->ssid_len)
 		return;
 
-	bss = cfg80211_get_bss(wdev->wiphy, channel, bssid, NULL, 0,
+	bss = cfg80211_get_bss(wdev->wiphy, NULL, bssid,
+			       wdev->ssid, wdev->ssid_len,
 			       WLAN_CAPABILITY_IBSS, WLAN_CAPABILITY_IBSS);
 
 	if (WARN_ON(!bss))
@@ -54,26 +54,21 @@ void __cfg80211_ibss_joined(struct net_device *dev, const u8 *bssid,
 #endif
 }
 
-void cfg80211_ibss_joined(struct net_device *dev, const u8 *bssid,
-			  struct ieee80211_channel *channel, gfp_t gfp)
+void cfg80211_ibss_joined(struct net_device *dev, const u8 *bssid, gfp_t gfp)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct cfg80211_registered_device *rdev = wiphy_to_dev(wdev->wiphy);
 	struct cfg80211_event *ev;
 	unsigned long flags;
 
-	trace_cfg80211_ibss_joined(dev, bssid, channel);
-
-	if (WARN_ON(!channel))
-		return;
+	trace_cfg80211_ibss_joined(dev, bssid);
 
 	ev = kzalloc(sizeof(*ev), gfp);
 	if (!ev)
 		return;
 
 	ev->type = EVENT_IBSS_JOINED;
-	memcpy(ev->ij.bssid, bssid, ETH_ALEN);
-	ev->ij.channel = channel;
+	memcpy(ev->cr.bssid, bssid, ETH_ALEN);
 
 	spin_lock_irqsave(&wdev->event_lock, flags);
 	list_add_tail(&ev->list, &wdev->event_list);

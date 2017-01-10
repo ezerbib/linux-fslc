@@ -61,7 +61,6 @@
 #include <linux/page-debug-flags.h>
 #include <linux/hugetlb.h>
 #include <linux/sched/rt.h>
-#include <linux/locallock.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -230,18 +229,6 @@ int nr_node_ids __read_mostly = MAX_NUMNODES;
 int nr_online_nodes __read_mostly = 1;
 EXPORT_SYMBOL(nr_node_ids);
 EXPORT_SYMBOL(nr_online_nodes);
-#endif
-
-static DEFINE_LOCAL_IRQ_LOCK(pa_lock);
-
-#ifdef CONFIG_PREEMPT_RT_BASE
-# define cpu_lock_irqsave(cpu, flags)		\
-	local_lock_irqsave_on(pa_lock, flags, cpu)
-# define cpu_unlock_irqrestore(cpu, flags)	\
-	local_unlock_irqrestore_on(pa_lock, flags, cpu)
-#else
-# define cpu_lock_irqsave(cpu, flags)		local_irq_save(flags)
-# define cpu_unlock_irqrestore(cpu, flags)	local_irq_restore(flags)
 #endif
 
 int page_group_by_mobility_disabled __read_mostly;
@@ -675,7 +662,7 @@ static inline int free_pages_check(struct page *page)
 }
 
 /*
- * Frees a number of pages which have been collected from the pcp lists.
+ * Frees a number of pages from the PCP lists
  * Assumes all pages on list are in same zone, and of same order.
  * count is the number of pages to free.
  *
@@ -686,51 +673,17 @@ static inline int free_pages_check(struct page *page)
  * pinned" detection logic.
  */
 static void free_pcppages_bulk(struct zone *zone, int count,
-					struct list_head *list)
+					struct per_cpu_pages *pcp)
 {
+	int migratetype = 0;
+	int batch_free = 0;
 	int to_free = count;
 	unsigned long nr_scanned;
-	unsigned long flags;
 
-	spin_lock_irqsave(&zone->lock, flags);
+	spin_lock(&zone->lock);
 	nr_scanned = zone_page_state(zone, NR_PAGES_SCANNED);
 	if (nr_scanned)
 		__mod_zone_page_state(zone, NR_PAGES_SCANNED, -nr_scanned);
-
-	while (!list_empty(list)) {
-		struct page *page = list_first_entry(list, struct page, lru);
-		int mt; /* migratetype of the to-be-freed page */
-
-		/* must delete as __free_one_page list manipulates */
-		list_del(&page->lru);
-
-		mt = get_freepage_migratetype(page);
-		/* MIGRATE_MOVABLE list may include MIGRATE_RESERVEs */
-		__free_one_page(page, page_to_pfn(page), zone, 0, mt);
-		trace_mm_page_pcpu_drain(page, 0, mt);
-		if (likely(!is_migrate_isolate_page(page))) {
-			__mod_zone_page_state(zone, NR_FREE_PAGES, 1);
-			if (is_migrate_cma(mt))
-				__mod_zone_page_state(zone, NR_FREE_CMA_PAGES, 1);
-		}
-
-		to_free--;
-	}
-	WARN_ON(to_free != 0);
-	spin_unlock_irqrestore(&zone->lock, flags);
-}
-
-/*
- * Moves a number of pages from the PCP lists to free list which
- * is freed outside of the locked region.
- *
- * Assumes all pages on list are in same zone, and of same order.
- * count is the number of pages to free.
- */
-static void isolate_pcp_pages(int to_free, struct per_cpu_pages *src,
-		struct list_head *dst)
-{
-	int migratetype = 0, batch_free = 0;
 
 	while (to_free) {
 		struct page *page;
@@ -747,7 +700,7 @@ static void isolate_pcp_pages(int to_free, struct per_cpu_pages *src,
 			batch_free++;
 			if (++migratetype == MIGRATE_PCPTYPES)
 				migratetype = 0;
-			list = &src->lists[migratetype];
+			list = &pcp->lists[migratetype];
 		} while (list_empty(list));
 
 		/* This is the only non-empty list. Free them all. */
@@ -755,11 +708,23 @@ static void isolate_pcp_pages(int to_free, struct per_cpu_pages *src,
 			batch_free = to_free;
 
 		do {
-			page = list_last_entry(list, struct page, lru);
+			int mt;	/* migratetype of the to-be-freed page */
+
+			page = list_entry(list->prev, struct page, lru);
+			/* must delete as __free_one_page list manipulates */
 			list_del(&page->lru);
-			list_add(&page->lru, dst);
+			mt = get_freepage_migratetype(page);
+			/* MIGRATE_MOVABLE list may include MIGRATE_RESERVEs */
+			__free_one_page(page, page_to_pfn(page), zone, 0, mt);
+			trace_mm_page_pcpu_drain(page, 0, mt);
+			if (likely(!is_migrate_isolate_page(page))) {
+				__mod_zone_page_state(zone, NR_FREE_PAGES, 1);
+				if (is_migrate_cma(mt))
+					__mod_zone_page_state(zone, NR_FREE_CMA_PAGES, 1);
+			}
 		} while (--to_free && --batch_free && !list_empty(list));
 	}
+	spin_unlock(&zone->lock);
 }
 
 static void free_one_page(struct zone *zone,
@@ -768,9 +733,7 @@ static void free_one_page(struct zone *zone,
 				int migratetype)
 {
 	unsigned long nr_scanned;
-	unsigned long flags;
-
-	spin_lock_irqsave(&zone->lock, flags);
+	spin_lock(&zone->lock);
 	nr_scanned = zone_page_state(zone, NR_PAGES_SCANNED);
 	if (nr_scanned)
 		__mod_zone_page_state(zone, NR_PAGES_SCANNED, -nr_scanned);
@@ -778,7 +741,7 @@ static void free_one_page(struct zone *zone,
 	__free_one_page(page, pfn, zone, order, migratetype);
 	if (unlikely(!is_migrate_isolate(migratetype)))
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
-	spin_unlock_irqrestore(&zone->lock, flags);
+	spin_unlock(&zone->lock);
 }
 
 static bool free_pages_prepare(struct page *page, unsigned int order)
@@ -818,11 +781,11 @@ static void __free_pages_ok(struct page *page, unsigned int order)
 		return;
 
 	migratetype = get_pfnblock_migratetype(page, pfn);
-	local_lock_irqsave(pa_lock, flags);
+	local_irq_save(flags);
 	__count_vm_events(PGFREE, 1 << order);
 	set_freepage_migratetype(page, migratetype);
 	free_one_page(page_zone(page), page, pfn, order, migratetype);
-	local_unlock_irqrestore(pa_lock, flags);
+	local_irq_restore(flags);
 }
 
 void __init __free_pages_bootmem(struct page *page, unsigned int order)
@@ -1110,34 +1073,39 @@ static void change_pageblock_range(struct page *pageblock_page,
 }
 
 /*
- * When we are falling back to another migratetype during allocation, try to
- * steal extra free pages from the same pageblocks to satisfy further
- * allocations, instead of polluting multiple pageblocks.
+ * If breaking a large block of pages, move all free pages to the preferred
+ * allocation list. If falling back for a reclaimable kernel allocation, be
+ * more aggressive about taking ownership of free pages.
  *
- * If we are stealing a relatively large buddy page, it is likely there will
- * be more free pages in the pageblock, so try to steal them all. For
- * reclaimable and unmovable allocations, we steal regardless of page size,
- * as fragmentation caused by those allocations polluting movable pageblocks
- * is worse than movable allocations stealing from unmovable and reclaimable
- * pageblocks.
+ * On the other hand, never change migration type of MIGRATE_CMA pageblocks
+ * nor move CMA pages to different free lists. We don't want unmovable pages
+ * to be allocated from MIGRATE_CMA areas.
  *
- * If we claim more than half of the pageblock, change pageblock's migratetype
- * as well.
+ * Returns the allocation migratetype if free pages were stolen, or the
+ * fallback migratetype if it was decided not to steal.
  */
-static void try_to_steal_freepages(struct zone *zone, struct page *page,
+static int try_to_steal_freepages(struct zone *zone, struct page *page,
 				  int start_type, int fallback_type)
 {
 	int current_order = page_order(page);
 
+	/*
+	 * When borrowing from MIGRATE_CMA, we need to release the excess
+	 * buddy pages to CMA itself. We also ensure the freepage_migratetype
+	 * is set to CMA so it is returned to the correct freelist in case
+	 * the page ends up being not actually allocated from the pcp lists.
+	 */
+	if (is_migrate_cma(fallback_type))
+		return fallback_type;
+
 	/* Take ownership for orders >= pageblock_order */
 	if (current_order >= pageblock_order) {
 		change_pageblock_range(page, current_order, start_type);
-		return;
+		return start_type;
 	}
 
 	if (current_order >= pageblock_order / 2 ||
 	    start_type == MIGRATE_RECLAIMABLE ||
-	    start_type == MIGRATE_UNMOVABLE ||
 	    page_group_by_mobility_disabled) {
 		int pages;
 
@@ -1147,7 +1115,11 @@ static void try_to_steal_freepages(struct zone *zone, struct page *page,
 		if (pages >= (1 << (pageblock_order-1)) ||
 				page_group_by_mobility_disabled)
 			set_pageblock_migratetype(page, start_type);
+
+		return start_type;
 	}
+
+	return fallback_type;
 }
 
 /* Remove an element from the buddy allocator from the fallback list */
@@ -1157,15 +1129,14 @@ __rmqueue_fallback(struct zone *zone, unsigned int order, int start_migratetype)
 	struct free_area *area;
 	unsigned int current_order;
 	struct page *page;
+	int migratetype, new_type, i;
 
 	/* Find the largest possible block of pages in the other list */
 	for (current_order = MAX_ORDER-1;
 				current_order >= order && current_order <= MAX_ORDER-1;
 				--current_order) {
-		int i;
 		for (i = 0;; i++) {
-			int migratetype = fallbacks[start_migratetype][i];
-			int buddy_type = start_migratetype;
+			migratetype = fallbacks[start_migratetype][i];
 
 			/* MIGRATE_RESERVE handled later if necessary */
 			if (migratetype == MIGRATE_RESERVE)
@@ -1179,36 +1150,22 @@ __rmqueue_fallback(struct zone *zone, unsigned int order, int start_migratetype)
 					struct page, lru);
 			area->nr_free--;
 
-			if (!is_migrate_cma(migratetype)) {
-				try_to_steal_freepages(zone, page,
-							start_migratetype,
-							migratetype);
-			} else {
-				/*
-				 * When borrowing from MIGRATE_CMA, we need to
-				 * release the excess buddy pages to CMA
-				 * itself, and we do not try to steal extra
-				 * free pages.
-				 */
-				buddy_type = migratetype;
-			}
+			new_type = try_to_steal_freepages(zone, page,
+							  start_migratetype,
+							  migratetype);
 
 			/* Remove the page from the freelists */
 			list_del(&page->lru);
 			rmv_page_order(page);
 
 			expand(zone, page, order, current_order, area,
-					buddy_type);
-
-			/*
-			 * The freepage_migratetype may differ from pageblock's
+			       new_type);
+			/* The freepage_migratetype may differ from pageblock's
 			 * migratetype depending on the decisions in
-			 * try_to_steal_freepages(). This is OK as long as it
-			 * does not differ for MIGRATE_CMA pageblocks. For CMA
-			 * we need to make sure unallocated pages flushed from
-			 * pcp lists are returned to the correct freelist.
+			 * try_to_steal_freepages. This is OK as long as it does
+			 * not differ for MIGRATE_CMA type.
 			 */
-			set_freepage_migratetype(page, buddy_type);
+			set_freepage_migratetype(page, new_type);
 
 			trace_mm_page_alloc_extfrag(page, order, current_order,
 				start_migratetype, migratetype);
@@ -1302,22 +1259,20 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 {
 	unsigned long flags;
-	LIST_HEAD(dst);
 	int to_drain;
 	unsigned long batch;
 
-	local_lock_irqsave(pa_lock, flags);
+	local_irq_save(flags);
 	batch = ACCESS_ONCE(pcp->batch);
 	if (pcp->count >= batch)
 		to_drain = batch;
 	else
 		to_drain = pcp->count;
 	if (to_drain > 0) {
-		isolate_pcp_pages(to_drain, pcp, &dst);
+		free_pcppages_bulk(zone, to_drain, pcp);
 		pcp->count -= to_drain;
 	}
-	local_unlock_irqrestore(pa_lock, flags);
-	free_pcppages_bulk(zone, to_drain, &dst);
+	local_irq_restore(flags);
 }
 #endif
 
@@ -1336,21 +1291,16 @@ static void drain_pages(unsigned int cpu)
 	for_each_populated_zone(zone) {
 		struct per_cpu_pageset *pset;
 		struct per_cpu_pages *pcp;
-		LIST_HEAD(dst);
-		int count;
 
-		cpu_lock_irqsave(cpu, flags);
+		local_irq_save(flags);
 		pset = per_cpu_ptr(zone->pageset, cpu);
 
 		pcp = &pset->pcp;
-		count = pcp->count;
-		if (count) {
-			isolate_pcp_pages(count, pcp, &dst);
+		if (pcp->count) {
+			free_pcppages_bulk(zone, pcp->count, pcp);
 			pcp->count = 0;
 		}
-		cpu_unlock_irqrestore(cpu, flags);
-		if (count)
-			free_pcppages_bulk(zone, count, &dst);
+		local_irq_restore(flags);
 	}
 }
 
@@ -1403,12 +1353,7 @@ void drain_all_pages(void)
 		else
 			cpumask_clear_cpu(cpu, &cpus_with_pcps);
 	}
-#ifndef CONFIG_PREEMPT_RT_BASE
 	on_each_cpu_mask(&cpus_with_pcps, drain_local_pages, NULL, 1);
-#else
-	for_each_cpu(cpu, &cpus_with_pcps)
-		drain_pages(cpu);
-#endif
 }
 
 #ifdef CONFIG_HIBERNATION
@@ -1464,7 +1409,7 @@ void free_hot_cold_page(struct page *page, bool cold)
 
 	migratetype = get_pfnblock_migratetype(page, pfn);
 	set_freepage_migratetype(page, migratetype);
-	local_lock_irqsave(pa_lock, flags);
+	local_irq_save(flags);
 	__count_vm_event(PGFREE);
 
 	/*
@@ -1490,17 +1435,12 @@ void free_hot_cold_page(struct page *page, bool cold)
 	pcp->count++;
 	if (pcp->count >= pcp->high) {
 		unsigned long batch = ACCESS_ONCE(pcp->batch);
-		LIST_HEAD(dst);
-
-		isolate_pcp_pages(batch, pcp, &dst);
+		free_pcppages_bulk(zone, batch, pcp);
 		pcp->count -= batch;
-		local_unlock_irqrestore(pa_lock, flags);
-		free_pcppages_bulk(zone, batch, &dst);
-		return;
 	}
 
 out:
-	local_unlock_irqrestore(pa_lock, flags);
+	local_irq_restore(flags);
 }
 
 /*
@@ -1630,7 +1570,7 @@ again:
 		struct per_cpu_pages *pcp;
 		struct list_head *list;
 
-		local_lock_irqsave(pa_lock, flags);
+		local_irq_save(flags);
 		pcp = &this_cpu_ptr(zone->pageset)->pcp;
 		list = &pcp->lists[migratetype];
 		if (list_empty(list)) {
@@ -1662,15 +1602,13 @@ again:
 			 */
 			WARN_ON_ONCE(order > 1);
 		}
-		local_spin_lock_irqsave(pa_lock, &zone->lock, flags);
+		spin_lock_irqsave(&zone->lock, flags);
 		page = __rmqueue(zone, order, migratetype);
-		if (!page) {
-			spin_unlock(&zone->lock);
+		spin_unlock(&zone->lock);
+		if (!page)
 			goto failed;
-		}
 		__mod_zone_freepage_state(zone, -(1 << order),
 					  get_freepage_migratetype(page));
-		spin_unlock(&zone->lock);
 	}
 
 	__mod_zone_page_state(zone, NR_ALLOC_BATCH, -(1 << order));
@@ -1680,7 +1618,7 @@ again:
 
 	__count_zone_vm_events(PGALLOC, zone, 1 << order);
 	zone_statistics(preferred_zone, zone, gfp_flags);
-	local_unlock_irqrestore(pa_lock, flags);
+	local_irq_restore(flags);
 
 	VM_BUG_ON_PAGE(bad_range(zone, page), page);
 	if (prep_new_page(page, order, gfp_flags))
@@ -1688,7 +1626,7 @@ again:
 	return page;
 
 failed:
-	local_unlock_irqrestore(pa_lock, flags);
+	local_irq_restore(flags);
 	return NULL;
 }
 
@@ -2400,8 +2338,8 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 		struct page *page;
 
 		/* Page migration frees to the PCP lists but we want merging */
-		drain_pages(get_cpu_light());
-		put_cpu_light();
+		drain_pages(get_cpu());
+		put_cpu();
 
 		page = get_page_from_freelist(gfp_mask, nodemask,
 				order, zonelist, high_zoneidx,
@@ -5640,7 +5578,6 @@ static int page_alloc_cpu_notify(struct notifier_block *self,
 void __init page_alloc_init(void)
 {
 	hotcpu_notifier(page_alloc_cpu_notify, 0);
-	local_irq_lock_init(pa_lock);
 }
 
 /*
@@ -6534,7 +6471,7 @@ void zone_pcp_reset(struct zone *zone)
 	struct per_cpu_pageset *pset;
 
 	/* avoid races with drain_pages()  */
-	local_lock_irqsave(pa_lock, flags);
+	local_irq_save(flags);
 	if (zone->pageset != &boot_pageset) {
 		for_each_online_cpu(cpu) {
 			pset = per_cpu_ptr(zone->pageset, cpu);
@@ -6543,7 +6480,7 @@ void zone_pcp_reset(struct zone *zone)
 		free_percpu(zone->pageset);
 		zone->pageset = &boot_pageset;
 	}
-	local_unlock_irqrestore(pa_lock, flags);
+	local_irq_restore(flags);
 }
 
 #ifdef CONFIG_MEMORY_HOTREMOVE

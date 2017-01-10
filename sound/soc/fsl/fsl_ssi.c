@@ -44,7 +44,7 @@
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
-#include <linux/busfreq-imx6.h>
+#include <linux/busfreq-imx.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -207,14 +207,6 @@ static const struct regmap_config fsl_ssi_regconfig = {
 	.volatile_reg = fsl_ssi_volatile_reg,
 	.writeable_reg = fsl_ssi_writeable_reg,
 	.cache_type = REGCACHE_RBTREE,
-};
-
-static const struct regmap_config fsl_ssi_regconfig_ac97 = {
-	.max_register = CCSR_SSI_SACCDIS,
-	.reg_bits = 32,
-	.val_bits = 32,
-	.reg_stride = 4,
-	.val_format_endian = REGMAP_ENDIAN_NATIVE,
 };
 
 struct fsl_ssi_soc_data {
@@ -977,11 +969,6 @@ static int _fsl_ssi_set_dai_fmt(struct fsl_ssi_private *ssi_private,
 	case SND_SOC_DAIFMT_CBM_CFM:
 		scr &= ~CCSR_SSI_SCR_SYS_CLK_EN;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
-		strcr &= ~CCSR_SSI_STCR_TXDIR; /* transmit clock is external */
-		strcr |= CCSR_SSI_STCR_TFDIR;  /* frame sync generated internally */
-		scr &= ~CCSR_SSI_SCR_SYS_CLK_EN;
-		break;
 	default:
 		return -EINVAL;
 	}
@@ -1183,7 +1170,6 @@ static const struct snd_soc_component_driver fsl_ssi_component = {
 };
 
 static struct snd_soc_dai_driver fsl_ssi_ac97_dai = {
-	.probe = fsl_ssi_dai_probe,
 	.ac97_control = 1,
 	.playback = {
 		.stream_name = "AC97 Playback",
@@ -1275,6 +1261,7 @@ static int fsl_ssi_imx_probe(struct platform_device *pdev,
 	struct device_node *np = pdev->dev.of_node;
 	u32 dmas[4];
 	int ret;
+	u32 buffer_size;
 
 	if (ssi_private->has_ipg_clk_name)
 		ssi_private->clk = devm_clk_get(&pdev->dev, "ipg");
@@ -1311,7 +1298,7 @@ static int fsl_ssi_imx_probe(struct platform_device *pdev,
 	ssi_private->dma_params_tx.addr = ssi_private->ssi_phys + CCSR_SSI_STX0;
 	ssi_private->dma_params_rx.addr = ssi_private->ssi_phys + CCSR_SSI_SRX0;
 
-	ret = !of_property_read_u32_array(np, "dmas", dmas, 4);
+	ret = of_property_read_u32_array(np, "dmas", dmas, 4);
 	if (ssi_private->use_dma && !ret && dmas[2] == IMX_DMATYPE_SSI_DUAL) {
 		ssi_private->use_dual_fifo = true;
 		/* When using dual fifo mode, we need to keep watermark
@@ -1320,6 +1307,9 @@ static int fsl_ssi_imx_probe(struct platform_device *pdev,
 		ssi_private->dma_params_tx.maxburst &= ~0x1;
 		ssi_private->dma_params_rx.maxburst &= ~0x1;
 	}
+
+	if (of_property_read_u32(np, "fsl,dma-buffer-size", &buffer_size))
+		buffer_size = IMX_SSI_DMABUF_SIZE;
 
 	if (!ssi_private->use_dma) {
 
@@ -1341,7 +1331,7 @@ static int fsl_ssi_imx_probe(struct platform_device *pdev,
 		if (ret)
 			goto error_pcm;
 	} else {
-		ret = imx_pcm_dma_init(pdev, IMX_SSI_DMABUF_SIZE);
+		ret = imx_pcm_dma_init(pdev, buffer_size);
 		if (ret)
 			goto error_pcm;
 	}
@@ -1375,7 +1365,6 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 	struct resource res;
 	void __iomem *iomem;
 	char name[64];
-	const struct regmap_config *pfsl_ssi_regconfig;
 
 	/* SSIs that are not connected on the board should have a
 	 *      status = "disabled"
@@ -1400,7 +1389,7 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 	sprop = of_get_property(np, "fsl,mode", NULL);
 	if (sprop) {
 		if (!strcmp(sprop, "ac97-slave"))
-			ssi_private->dai_fmt = SND_SOC_DAIFMT_AC97 | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBM_CFS;
+			ssi_private->dai_fmt = SND_SOC_DAIFMT_AC97;
 		else if (!strcmp(sprop, "i2s-slave"))
 			ssi_private->dai_fmt = SND_SOC_DAIFMT_I2S |
 				SND_SOC_DAIFMT_CBM_CFM;
@@ -1436,21 +1425,16 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "could not map device resources\n");
 		return -ENOMEM;
 	}
-	
-	if (!fsl_ssi_is_ac97(ssi_private))
-		pfsl_ssi_regconfig = &fsl_ssi_regconfig;
-	else
-		pfsl_ssi_regconfig = &fsl_ssi_regconfig_ac97;
 
 	ret = of_property_match_string(np, "clock-names", "ipg");
 	if (ret < 0) {
 		ssi_private->has_ipg_clk_name = false;
 		ssi_private->regs = devm_regmap_init_mmio(&pdev->dev, iomem,
-			pfsl_ssi_regconfig);
+			&fsl_ssi_regconfig);
 	} else {
 		ssi_private->has_ipg_clk_name = true;
 		ssi_private->regs = devm_regmap_init_mmio_clk(&pdev->dev,
-			"ipg", iomem, pfsl_ssi_regconfig);
+			"ipg", iomem, &fsl_ssi_regconfig);
 	}
 	if (IS_ERR(ssi_private->regs)) {
 		dev_err(&pdev->dev, "Failed to init register map\n");
@@ -1486,12 +1470,6 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 		ret = fsl_ssi_imx_probe(pdev, ssi_private, iomem);
 		if (ret)
 			goto error_irqmap;
-	}
-
-	if (fsl_ssi_is_ac97(ssi_private)) {
-		ret = clk_prepare_enable(fsl_ac97_data->clk);
-		if (ret)
-			goto error_asoc_register;
 	}
 
 	ret = snd_soc_register_component(&pdev->dev, &fsl_ssi_component,

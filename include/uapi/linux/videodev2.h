@@ -139,7 +139,7 @@ enum v4l2_buf_type {
 #endif
 	V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE = 9,
 	V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE  = 10,
-	V4L2_BUF_TYPE_SENSOR		   = 11,
+	V4L2_BUF_TYPE_SENSOR               = 11,
 	/* Deprecated, do not use */
 	V4L2_BUF_TYPE_PRIVATE              = 0x80,
 };
@@ -1245,13 +1245,6 @@ struct v4l2_ext_controls {
 	__u32 error_idx;
 	__u32 reserved[2];
 	struct v4l2_ext_control *controls;
-};
-
-struct v4l2_send_command_control {
-	__u32		     id;
-	__u32		     value0;
-	__u32		     value1;
-	char	     	 debug[256];
 };
 
 #define V4L2_CTRL_ID_MASK      	  (0x0fffffff)

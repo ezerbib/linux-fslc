@@ -1538,7 +1538,11 @@ static s8
 wlc_user_txpwr_antport_to_rfport(struct brcms_phy *pi, uint chan, u32 band,
 				 u8 rate)
 {
-	return 0;
+	s8 offset = 0;
+
+	if (!pi->user_txpwr_at_rfport)
+		return offset;
+	return offset;
 }
 
 void wlc_phy_txpower_recalc_target(struct brcms_phy *pi)

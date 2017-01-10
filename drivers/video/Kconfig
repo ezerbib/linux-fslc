@@ -21,8 +21,6 @@ source "drivers/gpu/vga/Kconfig"
 
 source "drivers/gpu/host1x/Kconfig"
 
-source "drivers/gpu/galcore/Kconfig"
-
 source "drivers/gpu/drm/Kconfig"
 
 config VGASTATE
@@ -2277,11 +2275,6 @@ config FB_VIRTUAL
 	  the vfb_enable=1 option.
 
 	  If unsure, say N.
-
-config FB_VIRTUAL_PHYMEM
-	tristate "Virtual Frame Buffer with contiguous physical memory regions support"
-	depends on FB
-	default n
 
 config XEN_FBDEV_FRONTEND
 	tristate "Xen virtual frame buffer support"

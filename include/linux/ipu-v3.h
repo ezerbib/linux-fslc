@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2010 Sascha Hauer <s.hauer@pengutronix.de>
- * Copyright (C) 2011-2013 Freescale Semiconductor, Inc.
+ * Copyright (C) 2011-2015 Freescale Semiconductor, Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -127,18 +127,15 @@ typedef enum {
 	XY
 } display_addressing_t;
 
-struct mipi_fields {
-	uint32_t id;
-	uint32_t vc;
-	bool en;
-};
 /*!
  * Union of initialization parameters for a logical channel.
  */
 typedef union {
 	struct {
 		uint32_t csi;
-		struct mipi_fields mipi;
+		uint32_t mipi_id;
+		uint32_t mipi_vc;
+		bool mipi_en;
 		bool interlaced;
 	} csi_mem;
 	struct {
@@ -151,7 +148,9 @@ typedef union {
 		uint32_t outh_resize_ratio;
 		uint32_t outv_resize_ratio;
 		uint32_t csi;
-		struct mipi_fields mipi;
+		uint32_t mipi_id;
+		uint32_t mipi_vc;
+		bool mipi_en;
 	} csi_prp_enc_mem;
 	struct {
 		uint32_t in_width;
@@ -190,7 +189,9 @@ typedef union {
 		ipu_motion_sel motion_sel;
 		enum v4l2_field field_fmt;
 		uint32_t csi;
-		struct mipi_fields mipi;
+		uint32_t mipi_id;
+		uint32_t mipi_vc;
+		bool mipi_en;
 	} csi_prp_vf_mem;
 	struct {
 		uint32_t in_width;
@@ -586,12 +587,6 @@ struct ipu_soc;
 struct ipu_soc *ipu_get_soc(int id);
 int32_t ipu_init_channel(struct ipu_soc *ipu, ipu_channel_t channel, ipu_channel_params_t *params);
 void ipu_uninit_channel(struct ipu_soc *ipu, ipu_channel_t channel);
-
-struct ipu_chan;
-int32_t ipu_channel_request(struct ipu_soc *ipu, ipu_channel_t channel, ipu_channel_params_t *params, struct ipu_chan **p_ipu_chan);
-void ipu_channel_free(struct ipu_chan **p_ipu_chan);
-int32_t ipu_channel_disable(struct ipu_chan *ipu_chan, bool wait_for_stop);
-
 void ipu_disable_hsp_clk(struct ipu_soc *ipu);
 
 static inline bool ipu_can_rotate_in_place(ipu_rotate_mode_t rot)
@@ -621,6 +616,13 @@ int32_t ipu_update_channel_offset(struct ipu_soc *ipu, ipu_channel_t channel, ip
 				uint32_t stride,
 				uint32_t u, uint32_t v,
 				uint32_t vertical_offset, uint32_t horizontal_offset);
+
+int32_t ipu_get_channel_offset(uint32_t pixel_fmt,
+			       uint16_t width, uint16_t height,
+			       uint32_t stride,
+			       uint32_t u, uint32_t v,
+			       uint32_t vertical_offset, uint32_t horizontal_offset,
+			       uint32_t *u_offset, uint32_t *v_offset);
 
 int32_t ipu_select_buffer(struct ipu_soc *ipu, ipu_channel_t channel,
 			  ipu_buffer_t type, uint32_t bufNum);
@@ -704,7 +706,6 @@ int32_t ipu_disp_set_gamma_correction(struct ipu_soc *ipu, ipu_channel_t channel
 
 int ipu_init_async_panel(struct ipu_soc *ipu, int disp, int type, uint32_t cycle_time,
 			 uint32_t pixel_fmt, ipu_adc_sig_cfg_t sig);
-void ipu_disp_direct_write(struct ipu_soc *ipu, ipu_channel_t channel, u32 value, u32 offset);
 void ipu_reset_disp_panel(struct ipu_soc *ipu);
 
 /* CMOS Sensor Interface API */
@@ -731,12 +732,15 @@ void ipu_csi_set_window_size(struct ipu_soc *ipu, uint32_t width, uint32_t heigh
 
 void ipu_csi_set_window_pos(struct ipu_soc *ipu, uint32_t left, uint32_t top, uint32_t csi);
 
-void ipu_csi_window_size_crop(struct ipu_soc *ipu, uint32_t swidth, uint32_t sheight,
-		uint32_t width, uint32_t height, uint32_t left, uint32_t top, uint32_t csi);
-
 uint32_t bytes_per_pixel(uint32_t fmt);
 
 bool ipu_ch_param_bad_alpha_pos(uint32_t fmt);
+int ipu_ch_param_get_axi_id(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buffer_t type);
+ipu_color_space_t format_to_colorspace(uint32_t fmt);
+bool ipu_pixel_format_is_gpu_tile(uint32_t fmt);
+bool ipu_pixel_format_is_split_gpu_tile(uint32_t fmt);
+bool ipu_pixel_format_is_pre_yuv(uint32_t fmt);
+bool ipu_pixel_format_is_multiplanar_yuv(uint32_t fmt);
 
 struct ipuv3_fb_platform_data {
 	char				disp_dev[32];
@@ -755,6 +759,12 @@ struct ipuv3_fb_platform_data {
 	 * channel in bootloader.
 	 */
 	bool                            late_init;
+
+	/* Enable prefetch engine or not? */
+	bool				prefetch;
+
+	/* Enable the PRE resolve engine or not? */
+	bool				resolve;
 };
 
 #endif /* __LINUX_IPU_V3_H_ */

@@ -52,17 +52,6 @@ static int flexcan_stby_gpio;
 static int flexcan0_en;
 static int flexcan1_en;
 
-static int ar803x_smarteee = 0;
-
-static int __init ar803x_smarteee_setup(char *__unused)
-{
-        ar803x_smarteee = 1;
-        return 1;
-}
-
-__setup("ar803x_smarteee", ar803x_smarteee_setup);
-
-
 static void imx6q_fec_sleep_enable(int enabled)
 {
 	struct regmap *gpr;
@@ -220,6 +209,10 @@ static int ar8031_phy_fixup(struct phy_device *dev)
 {
 	u16 val;
 
+	/* Set RGMII IO voltage to 1.8V */
+	phy_write(dev, 0x1d, 0x1f);
+	phy_write(dev, 0x1e, 0x8);
+
 	/* disable phy AR8031 SmartEEE function. */
 	phy_write(dev, 0xd, 0x3);
 	phy_write(dev, 0xe, 0x805d);
@@ -253,11 +246,20 @@ static int ar8035_phy_fixup(struct phy_device *dev)
 {
 	u16 val;
 
+	/* Ar803x phy SmartEEE feature cause link status generates glitch,
+	 * which cause ethernet link down/up issue, so disable SmartEEE
+	 */
+	phy_write(dev, 0xd, 0x3);
+	phy_write(dev, 0xe, 0x805d);
+	phy_write(dev, 0xd, 0x4003);
+
+	val = phy_read(dev, 0xe);
+	phy_write(dev, 0xe, val & ~(1 << 8));
+
 	/*
-	 * Disable SmartEEE and Enable 125MHz clock from 
-	 * CLK_25M on the AR8031.  This is fed in to the
-	 * IMX6 on the ENET_REF_CLK (V22) pad. Also, 
-	 * introduce a tx clock delay.
+	 * Enable 125MHz clock from CLK_25M on the AR8031.  This
+	 * is fed in to the IMX6 on the ENET_REF_CLK (V22) pad.
+	 * Also, introduce a tx clock delay.
 	 *
 	 * This is the same as is the AR8031 fixup.
 	 */
@@ -267,31 +269,6 @@ static int ar8035_phy_fixup(struct phy_device *dev)
 	val = phy_read(dev, 0x0);
 	if (val & BMCR_PDOWN)
 		phy_write(dev, 0x0, val & ~BMCR_PDOWN);
-
-	if (!ar803x_smarteee)
-		return 0;
-
-	/* Ar803x phy SmartEEE feature cause link status generates glitch,
-	 * which cause ethernet link down/up issue, so disable SmartEEE
-	 */
-	phy_write(dev, 0xd, 0x3);
-	phy_write(dev, 0xe, 0x805d);
-	phy_write(dev, 0xd, 0x4003);
-	val = phy_read(dev, 0xe);
-	val |= (0x1 << 8);
-	phy_write(dev, 0xe, val);
-
-	/* Increase 1000BT tw time for SmartEEE. It seems that we need
-	 * a bit more time than standard to git up and running.  Bumping
-	 * up the Tw time allows us to enable SmartEEE without generating
-	 * ethernet disconnects occasionally
-	 */
-	phy_write(dev, 0xd, 0x3);
-	phy_write(dev, 0xe, 0x805b);
-	phy_write(dev, 0xd, 0x4003);
-	val = phy_read(dev, 0xe);
-	val = 0x1717;
-	phy_write(dev, 0xe, val);
 
 	return 0;
 }
@@ -377,11 +354,25 @@ static void __init imx6q_csi_mux_init(void)
 	}
 }
 
+static void __init imx6q_enet_clk_sel(void)
+{
+	struct regmap *gpr;
+
+	gpr = syscon_regmap_lookup_by_compatible("fsl,imx6q-iomuxc-gpr");
+	if (!IS_ERR(gpr))
+		regmap_update_bits(gpr, IOMUXC_GPR5,
+				   IMX6Q_GPR5_ENET_TX_CLK_SEL, IMX6Q_GPR5_ENET_TX_CLK_SEL);
+	else
+		pr_err("failed to find fsl,imx6q-iomux-gpr regmap\n");
+}
+
 static inline void imx6q_enet_init(void)
 {
 	imx6_enet_mac_init("fsl,imx6q-fec");
 	imx6q_enet_phy_init();
 	imx6q_1588_init();
+	if (cpu_is_imx6q() && imx_get_soc_revision() == IMX_CHIP_REVISION_2_0)
+		imx6q_enet_clk_sel();
 	imx6q_enet_plt_init();
 }
 
@@ -393,45 +384,15 @@ static const struct of_dev_auxdata imx6q_auxdata_lookup[] __initconst = {
 	{ /* sentinel */ }
 };
 
-static void __init imx6q_axi_init(void)
-{
-	struct regmap *gpr;
-	unsigned int mask;
-
-	gpr = syscon_regmap_lookup_by_compatible("fsl,imx6q-iomuxc-gpr");
-	if (!IS_ERR(gpr)) {
-		/*
-		 * Enable the cacheable attribute of VPU and IPU
-		 * AXI transactions.
-		 */
-		mask = IMX6Q_GPR4_VPU_WR_CACHE_SEL |
-			IMX6Q_GPR4_VPU_RD_CACHE_SEL |
-			IMX6Q_GPR4_VPU_P_WR_CACHE_VAL |
-			IMX6Q_GPR4_VPU_P_RD_CACHE_VAL_MASK |
-			IMX6Q_GPR4_IPU_WR_CACHE_CTL |
-			IMX6Q_GPR4_IPU_RD_CACHE_CTL;
-		regmap_update_bits(gpr, IOMUXC_GPR4, mask, mask);
-
-		/* Increase IPU read QoS priority */
-		regmap_update_bits(gpr, IOMUXC_GPR6,
-				IMX6Q_GPR6_IPU1_ID00_RD_QOS_MASK |
-				IMX6Q_GPR6_IPU1_ID01_RD_QOS_MASK,
-				(0xf << 16) | (0x7 << 20));
-		regmap_update_bits(gpr, IOMUXC_GPR7,
-				IMX6Q_GPR7_IPU2_ID00_RD_QOS_MASK |
-				IMX6Q_GPR7_IPU2_ID01_RD_QOS_MASK,
-				(0xf << 16) | (0x7 << 20));
-	} else {
-		pr_warn("failed to find fsl,imx6q-iomuxc-gpr regmap\n");
-	}
-}
-
 static void __init imx6q_init_machine(void)
 {
 	struct device *parent;
 
-	imx_print_silicon_rev(cpu_is_imx6dl() ? "i.MX6DL" : "i.MX6Q",
-			      imx_get_soc_revision());
+	if (cpu_is_imx6q() && imx_get_soc_revision() == IMX_CHIP_REVISION_2_0)
+		imx_print_silicon_rev("i.MX6QP", IMX_CHIP_REVISION_1_0);
+	else
+		imx_print_silicon_rev(cpu_is_imx6dl() ? "i.MX6DL" : "i.MX6Q",
+				 imx_get_soc_revision());
 
 	mxc_arch_reset_init_dt();
 
@@ -446,7 +407,6 @@ static void __init imx6q_init_machine(void)
 	imx_anatop_init();
 	imx6q_csi_mux_init();
 	cpu_is_imx6q() ?  imx6q_pm_init() : imx6dl_pm_init();
-	imx6q_axi_init();
 }
 
 #define OCOTP_CFG3			0x440
@@ -458,7 +418,6 @@ static void __init imx6q_init_machine(void)
 static void __init imx6q_opp_check_speed_grading(struct device *cpu_dev)
 {
 	struct device_node *np;
-	struct dev_pm_opp *opp;
 	void __iomem *base;
 	u32 val;
 
@@ -486,37 +445,22 @@ static void __init imx6q_opp_check_speed_grading(struct device *cpu_dev)
 	val >>= OCOTP_CFG3_SPEED_SHIFT;
 	val &= 0x3;
 
-	if (val != OCOTP_CFG3_SPEED_1P2GHZ) {
-		opp = dev_pm_opp_find_freq_exact(cpu_dev, 1200000000, true);
-		if (!IS_ERR(opp)) {
-			if (dev_pm_opp_disable(cpu_dev, 1200000000))
-				pr_warn("failed to disable 1.2 GHz OPP\n");
-		}
-	}
-	if (val < OCOTP_CFG3_SPEED_996MHZ) {
-		opp = dev_pm_opp_find_freq_exact(cpu_dev, 996000000, true);
-		if (!IS_ERR(opp)) {
-			if (dev_pm_opp_disable(cpu_dev, 996000000))
-				pr_warn("failed to disable 996 MHz OPP\n");
-		}
-	}
+	if (val != OCOTP_CFG3_SPEED_1P2GHZ)
+		if (dev_pm_opp_disable(cpu_dev, 1200000000))
+			pr_warn("failed to disable 1.2 GHz OPP\n");
+	if (val < OCOTP_CFG3_SPEED_996MHZ)
+		if (dev_pm_opp_disable(cpu_dev, 996000000))
+			pr_warn("failed to disable 996 MHz OPP\n");
 	if (cpu_is_imx6q()) {
-		if (val != OCOTP_CFG3_SPEED_852MHZ) {
-			opp = dev_pm_opp_find_freq_exact(cpu_dev, 852000000, true);
-			if (!IS_ERR(opp)) {
-				if (dev_pm_opp_disable(cpu_dev, 852000000))
-					pr_warn("failed to disable 852 MHz OPP\n");
-			}
-		}
+		if (val != OCOTP_CFG3_SPEED_852MHZ)
+			if (dev_pm_opp_disable(cpu_dev, 852000000))
+				pr_warn("failed to disable 852 MHz OPP\n");
 	}
 
 	if (IS_ENABLED(CONFIG_MX6_VPU_352M)) {
-		opp = dev_pm_opp_find_freq_exact(cpu_dev, 352000000, true);
-		if (!IS_ERR(opp)) {
-			if (dev_pm_opp_disable(cpu_dev, 396000000))
-				pr_warn("failed to disable 396MHz OPP\n");
-			pr_info("remove 396MHz OPP for VPU running at 352MHz!\n");
-		}
+		if (dev_pm_opp_disable(cpu_dev, 396000000))
+			pr_warn("failed to disable 396MHz OPP\n");
+		pr_info("remove 396MHz OPP for VPU running at 352MHz!\n");
 	}
 
 put_node:
@@ -579,7 +523,9 @@ static void __init imx6q_map_io(void)
 	debug_ll_io_init();
 	imx_scu_map_io();
 	imx6_pm_map_io();
-	imx6_busfreq_map_io();
+#ifdef CONFIG_CPU_FREQ
+	imx_busfreq_map_io();
+#endif
 }
 
 static void __init imx6q_init_irq(void)

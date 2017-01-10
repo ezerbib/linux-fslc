@@ -61,7 +61,7 @@
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-#include <linux/busfreq-imx6.h>
+#include <linux/busfreq-imx.h>
 #include <linux/clk.h>
 #include <linux/genalloc.h>
 #include <linux/mxc_vpu.h>
@@ -259,7 +259,7 @@ static int cpu_is_mx51(void)
 static int vpu_alloc_dma_buffer(struct vpu_mem_desc *mem)
 {
 	mem->cpu_addr = (unsigned long)
-	    dma_alloc_coherent(vpu_dev, PAGE_ALIGN(mem->size),
+	    dma_alloc_coherent(NULL, PAGE_ALIGN(mem->size),
 			       (dma_addr_t *) (&mem->phy_addr),
 			       GFP_DMA | GFP_KERNEL);
 	dev_dbg(vpu_dev, "[ALLOC] mem alloc cpu_addr = 0x%x\n", mem->cpu_addr);
@@ -276,7 +276,7 @@ static int vpu_alloc_dma_buffer(struct vpu_mem_desc *mem)
 static void vpu_free_dma_buffer(struct vpu_mem_desc *mem)
 {
 	if (mem->cpu_addr != 0) {
-		dma_free_coherent(vpu_dev, PAGE_ALIGN(mem->size),
+		dma_free_coherent(0, PAGE_ALIGN(mem->size),
 				  (void *)mem->cpu_addr, mem->phy_addr);
 	}
 }
