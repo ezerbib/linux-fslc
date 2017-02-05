@@ -4161,7 +4161,7 @@ static void report_netlink(struct tc_data *td)
 	char *envp[2];
 	envp[0] = &str_on[0];
 	envp[1] = NULL;
-	sprintf(envp[0], "HDMI RX: %d (%s) %d %d",
+	snprintf(envp[0], sizeof(str_on), "HDMI RX: %d (%s) %d %d",
 			td->mode,
 			tc358743_mode_info_data[td->fps][td->mode].name,
 			tc358743_fps_list[td->fps], tc358743_audio_list[td->audio]);
@@ -4830,6 +4830,7 @@ static ssize_t tc358743_show_regdump(struct device *dev,
 	int i, len = 0;
 	int retval;
 	int size;
+	int buf_len = PAGE_SIZE-1;
 
 	if (!td)
 		return len;
@@ -4841,9 +4842,9 @@ static ssize_t tc358743_show_regdump(struct device *dev,
 
 		size = get_reg_size(reg, 0);
 		if (!(i & 0xf))
-			len += sprintf(buf+len, "\n%04X:", reg);
+			len += scnprintf(buf+len, buf_len - len, "\n%04X:", reg);
 		if (size == 0) {
-			len += sprintf(buf+len, " xx");
+			len += scnprintf(buf+len, buf_len - len, " xx");
 			size = 1;
 			continue;
 		}
@@ -4853,14 +4854,14 @@ static ssize_t tc358743_show_regdump(struct device *dev,
 			retval = 1;
 		}
 		if (size == 1)
-			len += sprintf(buf+len, " %02X", u32val&0xff);
+			len += scnprintf(buf+len, buf_len - len, " %02X", u32val&0xff);
 		else if (size == 2)
-			len += sprintf(buf+len, " %04X", u32val&0xffff);
+			len += scnprintf(buf+len, buf_len - len, " %04X", u32val&0xffff);
 		else
-			len += sprintf(buf+len, " %08X", u32val);
+			len += scnprintf(buf+len, buf_len - len, " %08X", u32val);
 	}
 	mutex_unlock(&td->access_lock);
-	len += sprintf(buf+len, "\n");
+	len += scnprintf(buf+len, buf_len - len, "\n");
 	return len;
 }
 
@@ -4883,7 +4884,8 @@ static ssize_t tc358743_show_regoffs(struct device *dev,
 {
 	int len = 0;
 
-	len += sprintf(buf+len, "0x%04X\n", regoffs);
+	//len += sprintf(buf+len, "0x%04X\n", regoffs);
+	len = scnprintf(buf, PAGE_SIZE,"0x%04X\n", regoffs);
 	return len;
 }
 
@@ -4908,7 +4910,8 @@ static ssize_t tc358743_show_hpd(struct device *dev,
 	struct tc_data *td = g_td;
 	int len = 0;
 
-	len += sprintf(buf+len, "%d\n", td->hpd_active);
+	//len += sprintf(buf+len, "%d\n", td->hpd_active);
+	len = scnprintf(buf, PAGE_SIZE, "%d\n", td->hpd_active);
 	return len;
 }
 
@@ -4917,10 +4920,10 @@ static DEVICE_ATTR(hpd, S_IRUGO|S_IWUSR, tc358743_show_hpd, tc358743_store_hpd);
 static ssize_t tc358743_show_hdmirx(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct tc_data *td = g_td;
+	//struct tc_data *td = g_td;
 	int len = 0;
 
-	len += sprintf(buf+len, "%d\n", td->mode);
+	//len += sprintf(buf+len, "%d\n", td->mode);
 	return len;
 }
 
@@ -4931,8 +4934,8 @@ static ssize_t tc358743_show_fps(struct device *dev,
 {
 	struct tc_data *td = g_td;
 	int len = 0;
-
-	len += sprintf(buf+len, "%d\n", tc358743_fps_list[td->fps]);
+	len = scnprintf(buf, PAGE_SIZE, "%d\n", tc358743_fps_list[td->fps]);
+	//len += sprintf(buf+len, "%d\n", tc358743_fps_list[td->fps]);
 	return len;
 }
 
@@ -4945,7 +4948,8 @@ static ssize_t tc358743_show_audio(struct device *dev,
 	struct tc_data *td = g_td;
 	int len = 0;
 
-	len += sprintf(buf+len, "%d\n", tc358743_audio_list[td->audio]);
+	//len += sprintf(buf+len, "%d\n", tc358743_audio_list[td->audio]);
+	len = scnprintf(buf, PAGE_SIZE, "%d\n", tc358743_audio_list[td->audio]);
 	return len;
 }
 
