@@ -2028,6 +2028,13 @@
 	};
 };
 
+&i2c3 {
+        clock-frequency = <100000>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_hummingboard_i2c3>;
+        status = "okay";
+};
+
 &iomuxc {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_hog>;
@@ -2060,6 +2067,11 @@
                                 /*MX6QDL_PAD_SD3_CLK__GPIO7_IO03 0x400130b1*/
                                 /* MX6QDL_PAD_EIM_DA3__GPIO3_IO03 0x400130b1*/
                                 MX6QDL_PAD_EIM_DA2__GPIO3_IO02 0x400130b1
+                                /* for Sii9612 and GPIO */
+                                MX6QDL_PAD_EIM_A17__GPIO2_IO21 0x400130b1
+                                MX6QDL_PAD_EIM_A18__GPIO2_IO20 0x400130b1
+                                MX6QDL_PAD_EIM_EB0__GPIO2_IO28 0x400130b1
+                                
                         >;
                 };
 
@@ -2107,6 +2119,13 @@
 				MX6QDL_PAD_KEY_ROW3__I2C2_SDA 0x4001b8b1
 			>;
 		};
+
+        pinctrl_hummingboard_i2c3: hummingboard-i2c3 {
+             fsl,pins = <
+				MX6QDL_PAD_EIM_D17__I2C3_SCL 0x4001b8b1
+				MX6QDL_PAD_EIM_D18__I2C3_SDA 0x4001b8b1
+             >;
+        };
 
 		pinctrl_hummingboard_mipi: hummingboard_mipi {
 			fsl,pins = <
@@ -2252,6 +2271,19 @@
 		};
 	};
 	
+    ecspi2 {
+
+   		pinctrl_ecspi2_1: ecspi2grp-1 {
+	        fsl,pins = <
+				MX6QDL_PAD_EIM_OE__ECSPI2_MISO	0x100b1
+				MX6QDL_PAD_EIM_CS1__ECSPI2_MOSI	0x100b1
+				MX6QDL_PAD_EIM_CS0__ECSPI2_SCLK	0x100b1
+				MX6QDL_PAD_EIM_RW__GPIO2_IO26	0x000b1 /* CS */
+         	>;
+
+   		};
+ 	};
+	
 };
 
 &ldb {
@@ -2372,7 +2404,19 @@
 	status = "okay";
 };
 
+&ecspi2 {
+	fsl,spi-num-chipselects = <1>;
+	cs-gpios = <&gpio2 26 0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_ecspi2_1>;
+	status = "okay";
 
+	spidev0: spi@0 {
+		compatible = "spidev";
+		reg = <0>;
+		spi-max-frequency = <20000000>;
+	};
+};
 
 / {
 	model = "SolidRun HummingBoard Dual/Quad";
