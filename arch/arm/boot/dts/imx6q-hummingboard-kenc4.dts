@@ -1077,6 +1077,8 @@
 				interrupts = <0 36 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clks IMX6QDL_CLK_I2C1>;
 				status = "disabled";
+				dmas = <&sdma 11 7 1>, <&sdma 12 7 2>;
+                dma-names = "rx", "tx";
 			};
 
 			i2c2: i2c@021a4000 {
@@ -1087,6 +1089,8 @@
 				interrupts = <0 37 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clks IMX6QDL_CLK_I2C2>;
 				status = "disabled";
+                dmas = <&sdma 13 7 1>, <&sdma 14 7 2>;
+                dma-names = "rx", "tx";
 			};
 
 			i2c3: i2c@021a8000 {
@@ -1097,6 +1101,8 @@
 				interrupts = <0 38 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clks IMX6QDL_CLK_I2C3>;
 				status = "disabled";
+                dmas = <&sdma 15 7 1>, <&sdma 16 7 2>;
+                dma-names = "rx", "tx";
 			};
 
 			romcp@021ac000 {
@@ -1976,8 +1982,13 @@
 };
 
 &i2c1 {
-	pinctrl-names = "default";
+	pinctrl-names = "default", "gpio";
 	pinctrl-0 = <&pinctrl_hummingboard_i2c1>;
+	pinctrl-1 = <&pinctrl_hummingboard_i2c1_gpio>;
+	/* MX6QDL_PAD_EIM_D21__I2C1_SCL 0x4001b8b1 */
+    /* MX6QDL_PAD_EIM_D28__I2C1_SDA 0x4001b8b1 */
+	scl-gpios = <&gpio3 21 GPIO_ACTIVE_HIGH>;
+    sda-gpios = <&gpio3 28 GPIO_ACTIVE_HIGH>;
 	status = "okay";
 
 	/* Pro baseboard model */
@@ -2111,6 +2122,13 @@
 				MX6QDL_PAD_EIM_D28__I2C1_SDA 0x4001b8b1
 			>;
 		};
+
+        pinctrl_hummingboard_i2c1_gpio: hummingboard-i2c1-gpio {
+            fsl,pins = <
+                MX6QDL_PAD_EIM_D21__GPIO3_IO21 0x400130b1
+                MX6QDL_PAD_EIM_D28__GPIO3_IO28 0x400130b1
+            >;
+        };
 
 		pinctrl_hummingboard_i2c2: hummingboard-i2c2 {
 			fsl,pins = <

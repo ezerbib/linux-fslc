@@ -404,8 +404,8 @@ struct i2c_bus_recovery_info {
 	void (*set_scl)(struct i2c_adapter *, int val);
 	int (*get_sda)(struct i2c_adapter *);
 
-	void (*prepare_recovery)(struct i2c_bus_recovery_info *bri);
-	void (*unprepare_recovery)(struct i2c_bus_recovery_info *bri);
+	void (*prepare_recovery)(struct i2c_adapter *adap);
+	void (*unprepare_recovery)(struct i2c_adapter *adap);
 
 	/* gpio recovery */
 	int scl_gpio;
