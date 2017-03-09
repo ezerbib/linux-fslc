@@ -1064,7 +1064,6 @@ static int i2c_imx_init_recovery_info(struct imx_i2c_struct *i2c_imx,
 	rinfo->unprepare_recovery = i2c_imx_unprepare_recovery;
 	rinfo->recover_bus = i2c_generic_gpio_recovery;
 	i2c_imx->adapter.bus_recovery_info = rinfo;
-	dev_err(&pdev->dev, "i2c_imx->adapter.bus_recovery_info = %p\n",rinfo);
 
 	return 0;
 }
