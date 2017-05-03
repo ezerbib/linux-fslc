@@ -213,6 +213,12 @@ const struct fb_videomode mxc_cea_mode[64] = {
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_16_9, 0
 	},
+	/* #63: 2048x1536p@40Hz 16:9 */
+	[63] = {
+		NULL, 40, 2048, 1536, 37108, 0, 0, 0, 0, 0, 0,
+		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+		FB_VMODE_NONINTERLACED | FB_VMODE_ASPECT_4_3, 0
+	},
 };
 
 /* 0x8 is FB_VMODE_FRACT (not yet merged) */
