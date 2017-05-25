@@ -4206,6 +4206,16 @@ static void tc358743_reset_phy(struct sensor_data *sd)
 	tc358743_write_reg(sd, PHY_RST, val | MASK_RESET_CTRL, 1);
 }
 
+static void tc358743_get_audio_sample_rate(struct sensor_data *sd)
+{
+	struct tc_data *td = container_of(sd, struct tc_data, sensor);
+	/* Get audio sample rate */
+	u32 u32val;
+	s32 ret = tc358743_read_reg(sd, FS_SET, &u32val);
+	if (ret >= 0)
+		td->audio = ((unsigned char)u32val) & 0x0f;
+}
+
 static void tc358743_format_change(struct sensor_data *sd)
 {
 	int hsize, vsize, fps, ret;
@@ -4392,7 +4402,10 @@ static void tc358743_hdmi_audio_int_handler(struct sensor_data *sd)
 	tc358743_write_reg(sd, AUDIO_INT, audio_int, 1);
 
 	pr_debug("%s: AUDIO_INT = 0x%02x\n", __func__, audio_int);
-	// TODO: handle audio change
+
+	// EZ: handle audio change
+	tc358743_get_audio_sample_rate(sd);
+
 }
 
 static void tc358743_csi_err_int_handler(struct sensor_data *sd)
@@ -5083,6 +5096,7 @@ static int tc358743_probe(struct i2c_client *client,
 #ifdef CONFIG_TC358743_AUDIO
 /* Audio setup */
 	retval = device_create_file(&client->dev, &dev_attr_audio);
+	tc358743_get_audio_sample_rate(sensor);
 #endif
 
 	tc358743_int_device.priv = td;
