@@ -13,6 +13,24 @@ rsync -avvr  -r release/lib/modules root@192.168.$ip:/lib/
 scp arch/arm/boot/zImage root@192.168.$ip:/boot/zImage-3.14.59-rt59+.new
 }
 
+my_go_install_version()
+{
+dst=$1
+dir=/home/ezerbib/workspace/KDS/Codebase/products/KDS-4/debian/kds-$dst-4/
+rsync -avvr  -r release/lib/modules ${dir}/lib
+cp arch/arm/boot/zImage ${dir}/boot/zImage-3.14.59-rt59+.new
+}
+
+my_go_install_version_dec()
+{
+my_go_install_version kdec
+}
+
+my_go_install_version_enc()
+{
+my_go_install_version ken
+}
+
 my_go_install_dec()
 {
 my_go_install 68.151

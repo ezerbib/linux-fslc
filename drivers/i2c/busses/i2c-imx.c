@@ -220,6 +220,7 @@ struct imx_i2c_struct {
 	struct pinctrl_state *pinctrl_pins_gpio;
 
 	struct imx_i2c_dma	*dma;
+	int 				recovery_cnt;
 };
 
 static const struct imx_i2c_hwdata imx1_i2c_hwdata = {
@@ -923,8 +924,9 @@ static int i2c_imx_xfer(struct i2c_adapter *adapter,
 	dev_dbg(&i2c_imx->adapter.dev, "<%s> first start call result=%d\n", __func__,result);
 	if (result) {
 		dev_dbg(&i2c_imx->adapter.dev, "<%s> result=%d\n", __func__,result);
-		dev_err(&i2c_imx->adapter.dev, "<%s> i2c_imx->adapter.bus_recovery_info=%p\n", __func__,i2c_imx->adapter.bus_recovery_info);
-		if (i2c_imx->adapter.bus_recovery_info) {
+		dev_dbg(&i2c_imx->adapter.dev, "<%s> i2c_imx->adapter.bus_recovery_info=%p\n", __func__,i2c_imx->adapter.bus_recovery_info);
+		if (i2c_imx->adapter.bus_recovery_info && (i2c_imx->recovery_cnt<10) ) {
+			i2c_imx->recovery_cnt++;
 			dev_err(&i2c_imx->adapter.dev, "call i2c_recover_bus\n");
 			i2c_recover_bus(&i2c_imx->adapter);
 			result = i2c_imx_start(i2c_imx);
@@ -935,6 +937,9 @@ static int i2c_imx_xfer(struct i2c_adapter *adapter,
 	if (result)
 		goto fail0;
 
+	if (i2c_imx->recovery_cnt){
+		i2c_imx->recovery_cnt=0;
+	}
 	/* read/write data */
 	for (i = 0; i < num; i++) {
 		if (i == num - 1)
