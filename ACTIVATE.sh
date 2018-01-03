@@ -18,7 +18,11 @@ my_go_install_version()
 dst=$1
 dir=/home/ezerbib/workspace/KDS/Codebase/products/KDS-4/debian/kds-$dst-4/
 rsync -avvr  -r release/lib/modules ${dir}/lib
-cp arch/arm/boot/zImage ${dir}/boot/zImage-3.14.59-rt59+.new
+cp -v arch/arm/boot/zImage ${dir}/boot/zImage-3.14.59-rt59+.new
+#rename dst for dtb filename matching
+[ "$dst" = "ken" ] && dst=kenc
+#even in encoder the file load is kdec4
+cp -v ./arch/arm/boot/dts/imx6q-hummingboard-${dst}4.dtb ${dir}/boot/imx6q-hummingboard-kdec4.dtb
 }
 
 my_go_install_version_dec()
