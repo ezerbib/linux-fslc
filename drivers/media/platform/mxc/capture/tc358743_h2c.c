@@ -4134,7 +4134,8 @@ struct tc_mode_list {
 	enum tc358743_mode mode;
 };
 
-static int tc358743_audio_list[16] =
+#define nmax_tc358743_audio_list 16
+static int tc358743_audio_list[nmax_tc358743_audio_list] =
 {
 	44100,
 	0,
@@ -4154,6 +4155,16 @@ static int tc358743_audio_list[16] =
 	0
 };
 
+static int get_tc358743_audio_list(int nIndex)
+{
+	if ((nIndex>=0)&&(nIndex<nmax_tc358743_audio_list))
+	{
+		return tc358743_audio_list[nIndex];
+	}
+	else
+		return 0;
+}
+
 static char str_on[80];
 static void report_netlink(struct tc_data *td)
 {
@@ -4164,12 +4175,12 @@ static void report_netlink(struct tc_data *td)
 	snprintf(envp[0], sizeof(str_on), "HDMI RX: %d (%s) %d %d",
 			td->mode,
 			tc358743_mode_info_data[td->fps][td->mode].name,
-			tc358743_fps_list[td->fps], tc358743_audio_list[td->audio]);
+			tc358743_fps_list[td->fps], get_tc358743_audio_list(td->audio));
 	kobject_uevent_env(&(sensor->i2c_client->dev.kobj), KOBJ_CHANGE, envp);
 	pr_debug("%s: HDMI RX (%d) mode: %s fps: %d audio: %d\n",
 		__func__, td->mode,
 		tc358743_mode_info_data[td->fps][td->mode].name, td->fps,
-		tc358743_audio_list[td->audio]);
+		get_tc358743_audio_list(td->audio));
 }
 
 /* --------------- STATUS --------------- */
@@ -4960,9 +4971,16 @@ static ssize_t tc358743_show_audio(struct device *dev,
 {
 	struct tc_data *td = g_td;
 	int len = 0;
+	int n_audio=0;
 
 	//len += sprintf(buf+len, "%d\n", tc358743_audio_list[td->audio]);
-	len = scnprintf(buf, PAGE_SIZE, "%d\n", tc358743_audio_list[td->audio]);
+	if (td)
+	{
+		n_audio=get_tc358743_audio_list(td->audio);
+	}
+
+	len = scnprintf(buf, PAGE_SIZE, "%d\n", n_audio);
+
 	return len;
 }
 
