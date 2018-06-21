@@ -121,6 +121,8 @@ struct tc358743_mode_info {
 
 static struct tc_data *g_td;
 
+static void tc358743_reset_phy(struct sensor_data *sd);
+
 struct tc_data *tc358743_get_tc_data()
 {
 	return g_td;
@@ -2730,6 +2732,8 @@ static void tc358743_software_reset(struct sensor_data *sensor, u16 mask)
 
 	tc358743_write_reg(sensor, SYS_FREQ0, freq, 1);
 	tc358743_write_reg(sensor, SYS_FREQ1, freq >> 8, 1);
+
+	tc358743_reset_phy(sensor);
 }
 
 static void tc358743_enable_edid(struct sensor_data *sensor)
@@ -2831,15 +2835,21 @@ static int tc358743_toggle_hpd(struct sensor_data *sensor, int active)
 {
 	int ret = 0;
 	if (active) {
-		ret += tc358743_write_reg(sensor, HPD_CTL, 0x00, 1);
+		ret += tc358743_write_reg(sensor, HPD_CTL, MASK_HPD_CTL0, 1);
 		mdelay(500);
-		ret += tc358743_write_reg(sensor, HPD_CTL, MASK_HPD_CTL0, 1);
+		ret += tc358743_write_reg(sensor, HPD_CTL, MASK_HPD_CTL0|MASK_HPD_OUT0, 1);
 	} else {
-		ret += tc358743_write_reg(sensor, HPD_CTL, MASK_HPD_CTL0, 1);
+		// to set hpd down we must set down HPD_CTL0 to 0 then HPD_OUT0 to 0
+		ret += tc358743_write_reg(sensor, HPD_CTL, 0x00, 1);
 		mdelay(500);
 		ret += tc358743_write_reg(sensor, HPD_CTL, 0x00, 1);
 	}
 	return ret;
+}
+
+static int tc358743_get_hpdctl(struct sensor_data *sensor)
+{
+	return tc358743_read_reg_val(sensor, HPD_CTL);
 }
 
 static int get_format_index(enum tc358743_frame_rate frame_rate, enum tc358743_mode mode)
@@ -4214,6 +4224,7 @@ static void tc358743_reset_phy(struct sensor_data *sd)
 {
 	u8 val = tc358743_read_reg_val(sd, PHY_RST);
 	tc358743_write_reg(sd, PHY_RST, val & ~MASK_RESET_CTRL, 1);
+	mdelay(100);
 	tc358743_write_reg(sd, PHY_RST, val | MASK_RESET_CTRL, 1);
 }
 
@@ -4486,333 +4497,7 @@ static irqreturn_t tc358743_detect_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-#if 0
-static void tc_ack_interrupts(struct tc_data *td)
-{
-	int i,n;
-	struct sensor_data *sensor = &td->sensor;
-	u32 u32val;
-	s32 retval;
-	u16 regoffs;
-	u16 t[]={ 0x8502, 0x8503, 0x8504, 0x8505, 0x8507, 0x8508, 0x8509, 0x850b, 0x850f};
-	//u16 t2[]={ 0x0016, 0x0014 };
 
-	//mutex_lock(&td->access_lock);
-	n=ARRAY_SIZE(t);
-	u32val=0xff;
-	for (i=0;i<n;i++)
-	{
-		//size = get_reg_size(regoffs, 0);
-		regoffs=t[i];
-		retval = tc358743_write_reg(sensor, regoffs, u32val, 0);
-		if (retval < 0)
-			pr_info("%s: err %d\n", __func__, retval);
-	}
-
-#if 0
-	n=ARRAY_SIZE(t2);
-	u32val=0xffff;
-	for (i=0;i<n;i++)
-	{
-		regoffs=t2[i];
-		retval = tc358743_write_reg(sensor, regoffs, u32val, 0);
-		if (retval < 0)
-			pr_info("%s: err %d\n", __func__, retval);
-	}
-#endif
-	// disable int
-	//u32val=0x7ff;
-	//retval = tc358743_write_reg(sensor, 0x0016, u32val, 0);
-	// ack all type of INT by writing 1 at each IntStatus flags bypassing the reserved values
-	//u32val=0x73f;
-	//retval = tc358743_write_reg(sensor, 0x0014, u32val, 0);
-#if 0
-	//if (0)
-	{
-		int loop = 0;
-		int ret;
-
-		//det_work_enable(td, 0);
-		for (;;)
-		{
-			//pr_debug("%s: tc358743_minit(td);\n", __func__);
-			//ret = tc358743_minit(td);
-			//if (!ret)
-			//	break;
-			void *mipi_csi2_info;
-			mipi_csi2_info = mipi_csi2_get_info();
-			//pr_debug("%s rate: %d mode: %d, info %p\n", __func__, frame_rate, mode, mipi_csi2_info);
-			ret = mipi_wait(mipi_csi2_info);
-			if (!ret)
-				break;
-
-			if (loop++ >= 3) {
-				pr_err("%s:failed(%d)\n", __func__, ret);
-				break;
-			}
-		}
-		//det_work_enable(td, 1);
-	}
-	//mutex_unlock(&td->access_lock);
-#endif
-
-}
-
-static const struct reg_value tc358743_setting_interrupts[] = {
-	{0x0016, 0x000005ff, 0x00000000, 2, 0},
-	// HDMI Interrupt Mask
-	{0x8502, 0x00000001, 0x00000000, 1, 0},
-	{0x8512, 0x000000fe, 0x00000000, 1, 0},
-	{0x8513, 0x0000008f, 0x00000000, 1, 0},		// CLK INTERRUPT MASK: unmask all
-	{0x8514, 0x000000ff, 0x00000000, 1, 0},
-	{0x8515, 0x000000ff, 0x00000000, 1, 0},
-	{0x8516, 0x000000ff, 0x00000000, 1, 0},
-	{0x851B, 0x000000fd, 0x00000000, 1, 0},     // unmask Sync_chg
-};
-
-static int tc_run_program(struct tc_data *td,const struct reg_value *pMode, s32 size)
-{
-	struct sensor_data *sensor = &td->sensor;
-	const struct reg_value *pModeSetting = NULL;
-	s32 i = 0;
-	s32 iModeSettingArySize = size;
-	register u32 RepeateLines = 0;
-	register int RepeateTimes = 0;
-	register u32 Delay_ms = 0;
-	register u16 RegAddr = 0;
-	register u32 Mask = 0;
-	register u32 Val = 0;
-	u8  Length;
-	int retval = 0;
-
-	for (i = 0; i < iModeSettingArySize; ++i) {
-		pModeSetting = pMode + i;
-
-		Delay_ms = pModeSetting->u32Delay_ms & (0xffff);
-		RegAddr = pModeSetting->u16RegAddr;
-		Val = pModeSetting->u32Val;
-		Mask = pModeSetting->u32Mask;
-		Length = pModeSetting->u8Length;
-		if (Mask) {
-			u32 RegVal = 0;
-
-			retval = tc358743_read_reg(sensor, RegAddr, &RegVal);
-			if (retval < 0) {
-				pr_err("%s: read failed, reg=0x%x\n", __func__, RegAddr);
-				return retval;
-			}
-			RegVal &= ~(u8)Mask;
-			Val &= Mask;
-			Val |= RegVal;
-		}
-
-		retval = tc358743_write_reg(sensor, RegAddr, Val, Length);
-		if (retval < 0) {
-			pr_err("%s: write failed, reg=0x%x\n", __func__, RegAddr);
-			return retval;
-		}
-		if (Delay_ms)
-			msleep(Delay_ms);
-
-		if (0 != ((pModeSetting->u32Delay_ms>>16) & (0xff))) {
-			if (!RepeateTimes) {
-				RepeateTimes = (pModeSetting->u32Delay_ms>>16) & (0xff);
-				RepeateLines = (pModeSetting->u32Delay_ms>>24) & (0xff);
-			}
-			if (--RepeateTimes > 0) {
-				i -= RepeateLines;
-			}
-		}
-	}
-
-	return retval;
-}
-
-
-static void tc_unmask_interrupts(struct tc_data *td)
-{
-	tc_run_program(td,tc358743_setting_interrupts,ARRAY_SIZE(tc358743_setting_interrupts));
-}
-#endif
-
-#if 0
-static void tc_det_worker(struct work_struct *work)
-{
-	struct tc_data *td = container_of(work, struct tc_data, det_work.work);
-	struct sensor_data *sensor = &td->sensor;
-	int ret;
-	u32 u32val, u852f;
-	enum tc358743_mode mode = tc358743_mode_INIT0;
-
-
-	if (!td->det_work_enable)
-		return;
-	mutex_lock(&td->access_lock);
-
-	if (!td->det_work_enable) {
-		goto out2;
-	}
-
-	u32val = 0;
-	//
-	// read Audio Sample Frequency mode register
-	//
-	ret = tc358743_read_reg(sensor, 0x8621, &u32val);
-	if (ret >= 0) {
-		// Test if audio has changed from previous probing
-		if (td->audio != (((unsigned char)u32val) & 0x0f)) {
-			// Keep only FS(sample frequency) field
-			td->audio = ((unsigned char)u32val) & 0x0f;
-			report_netlink(td);
-		}
-	}
-	u852f = 0;
-	ret = tc358743_read_reg(sensor, 0x852f, &u852f);
-	if (ret < 0) {
-		pr_err("%s: Error reading lock\n", __func__);
-		td->det_work_timeout = DET_WORK_TIMEOUT_DEFERRED;
-		goto out;
-	}
-	//pr_info("%s: EZ: 852f=%x\n", __func__, u852f);
-
-	if (u852f & TC3587430_HDMI_DETECT) {
-		//pr_info("%s: hdmi detect %x\n", __func__, u852f);
-		td->lock = u852f & TC3587430_HDMI_DETECT;
-		u32val = 0;
-		ret = tc358743_read_reg(sensor, 0x8521, &u32val);
-		if (ret < 0) {
-			pr_err("%s: Error reading mode\n", __func__);
-		}
-		//pr_info("%s: lost hdmi_detect 8521=%x\n", __func__, u32val);
-		u32val &= 0x0f;
-		// EZ - change to detect 30fps
-		if (u852f==0x3)
-		{
-			td->fps = tc358743_30_fps;
-		}
-		else
-		{
-			td->fps = tc358743_60_fps;
-		}
-
-		if (!u32val) {
-			int hsize, vsize;
-
-			hsize = tc358743_read_reg_val16(sensor, 0x8582);
-			vsize = tc358743_read_reg_val16(sensor, 0x8588);
-			pr_info("%s: detect hsize=%d, vsize=%d\n", __func__, hsize, vsize);
-			if ((hsize == 1024) && (vsize == 768))
-				mode = tc358743_mode_1024x768;
-			else if ((hsize == 800) && (vsize == 600))
-				mode = tc358743_mode_800x600;
-			else if ((hsize == 1280) && (vsize == 1024))
-				mode = tc358743_mode_1280x1024;
-			else if ((hsize == 848) && (vsize == 480))
-				mode = tc358743_mode_848x480;
-			else if ((hsize == 1600) && (vsize == 900))
-				mode = tc358743_mode_1600x900;
-			else if ((hsize == 1600) && (vsize == 1200))
-				mode = tc358743_mode_1600x1200;
-			else if ((hsize == 1366) && (vsize == 768))
-				mode = tc358743_mode_1366x768;
-			else if ((hsize == 1360) && (vsize == 768))
-				mode = tc358743_mode_1366x768;
-			else if ((hsize == 1440) && (vsize == 900))
-				mode = tc358743_mode_1440x900;
-//			else if ((hsize == 720) && (vsize == 480))
-//				mode = tc358743_mode_480P_720_480;
-			else if ((hsize == 1920) && (vsize == 1200))
-				mode = tc358743_mode_1920x1200;
-//			else if (hsize == 1280)
-//				mode = tc358743_mode_720P_60_1280_720;
-			else if (hsize == 1920)
-				mode = tc358743_mode_1080P_1920_1080;
-			td->fps = tc358743_60_fps;
-		} else {
-			mode = tc358743_mode_list[u32val].mode;
-			if (td->mode != mode)
-				pr_debug("%s: %s detected\n", __func__, tc358743_mode_list[u32val].name);
-			if (u852f >= 0xe)
-				td->fps = ((u852f & 0x0f) > 0xa)? tc358743_60_fps: tc358743_30_fps;
-		}
-	} else {
-		if (td->lock)
-			td->lock = 0;
-		u32val = 0;
-		ret = tc358743_read_reg(sensor, 0x8521, &u32val);
-		if (ret < 0) {
-			pr_err("%s: Error reading mode\n", __func__);
-		}
-//		pr_info("%s: 8521=%x\n", __func__, u32val);
-	}
-	if (td->mode != mode) {
-		td->det_work_timeout = DET_WORK_TIMEOUT_DEFAULT;
-		td->bounce = MAX_BOUNCE;
-		pr_debug("%s: HDMI RX (old mode:%d != new mode:%d) mode: %s fps: %d (%d, %d)\n",
-				__func__,
-				td->mode,
-				mode,
-				tc358743_mode_info_data[td->fps][mode].name,
-				td->fps,
-				td->bounce,
-				td->det_work_timeout);
-		td->mode = mode;
-		sensor->streamcap.capturemode = mode;
-		sensor->spix.swidth = tc358743_mode_info_data[td->fps][mode].width;
-		sensor->spix.sheight = tc358743_mode_info_data[td->fps][mode].height;
-		td->det_changed = 1;
-		pr_debug("%s: det_changed=1\n",__func__);
-
-	} else if (td->bounce) {
-		td->bounce--;
-		td->det_work_timeout = DET_WORK_TIMEOUT_DEFAULT;
-
-		if (!td->bounce) {
-			u32val = 0;
-			ret = tc358743_read_reg(sensor, 0x8621, &u32val);
-			if (ret >= 0) {
-				td->audio = ((unsigned char)u32val) & 0x0f;
-				report_netlink(td);
-			}
-			if (td->mode) {
-				td->det_work_timeout = DET_WORK_TIMEOUT_DEFERRED;
-				goto out2;
-			}
-		}
-	} else if (td->mode && !td->bounce) {
-		goto out2;
-	}
-out:
-	schedule_delayed_work(&td->det_work, msecs_to_jiffies(td->det_work_timeout));
-out2:
-	//tc_ack_interrupts(td);
-    //tc_unmask_interrupts(td);
-	mutex_unlock(&td->access_lock);
-}
-
-static irqreturn_t tc358743_detect_handler(int irq, void *data)
-{
-	struct tc_data *td = data;
-	struct sensor_data *sensor = &td->sensor;
-#ifdef CONFIG_TC358743_DEV
-	struct tc358743_irq_private *priv;
-#endif
-
-	//pr_debug("%s: IRQ %d\n", __func__, sensor->i2c_client->irq);
-	schedule_delayed_work(&td->det_work, msecs_to_jiffies(10));
-
-#ifdef CONFIG_TC358743_DEV
-	priv=td->tc_irq_priv;
-	pr_debug("%s: IRQ %d priv=%p\n", __func__, sensor->i2c_client->irq,priv);
-	if (priv)
-	{
-		atomic_inc(&priv->event);
-		wake_up_interruptible(&priv->alarm_wq);
-	}
-#endif
-	return IRQ_HANDLED;
-}
-#endif
 
 static	u16 regoffs = 0;
 
@@ -4940,6 +4625,36 @@ static ssize_t tc358743_show_hpd(struct device *dev,
 }
 
 static DEVICE_ATTR(hpd, S_IRUGO|S_IWUSR, tc358743_show_hpd, tc358743_store_hpd);
+
+static ssize_t tc358743_store_hpdctl(struct device *device,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct tc_data *td = g_td;
+	u32 val;
+	int retval;
+	retval = sscanf(buf, "%d", &val);
+	if (1 == retval)
+	{
+		tc358743_toggle_hpd(&td->sensor, val);
+
+	}
+	return count;
+}
+
+static ssize_t tc358743_show_hpdctl(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct tc_data *td = g_td;
+	int len = 0;
+
+	//len += sprintf(buf+len, "%d\n", td->hpd_active);
+	len = scnprintf(buf, PAGE_SIZE, "%02X\n",
+			tc358743_get_hpdctl(&td->sensor));
+	return len;
+}
+
+static DEVICE_ATTR(hpdctl, S_IRUGO|S_IWUSR, tc358743_show_hpdctl, tc358743_store_hpdctl);
 
 static ssize_t tc358743_show_hdmirx(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -5152,6 +4867,7 @@ static int tc358743_probe(struct i2c_client *client,
 	retval = device_create_file(dev, &dev_attr_fps);
 	retval |= device_create_file(dev, &dev_attr_hdmirx);
 	retval |= device_create_file(dev, &dev_attr_hpd);
+	retval |= device_create_file(dev, &dev_attr_hpdctl);
 	retval |= device_create_file(dev, &dev_attr_regoffs);
 	retval |= device_create_file(dev, &dev_attr_regdump);
 	if (retval) {
@@ -5178,6 +4894,7 @@ err3:
 	device_remove_file(dev, &dev_attr_fps);
 	device_remove_file(dev, &dev_attr_hdmirx);
 	device_remove_file(dev, &dev_attr_hpd);
+	device_remove_file(dev, &dev_attr_hpdctl);
 	device_remove_file(dev, &dev_attr_regoffs);
 	device_remove_file(dev, &dev_attr_regdump);
 err4:
@@ -5213,6 +4930,7 @@ static int tc358743_remove(struct i2c_client *client)
 	device_remove_file(&client->dev, &dev_attr_fps);
 	device_remove_file(&client->dev, &dev_attr_hdmirx);
 	device_remove_file(&client->dev, &dev_attr_hpd);
+	device_remove_file(&client->dev, &dev_attr_hpdctl);
 	device_remove_file(&client->dev, &dev_attr_regoffs);
 	device_remove_file(&client->dev, &dev_attr_regdump);
 
