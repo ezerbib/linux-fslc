@@ -1,8 +1,8 @@
 go()
 {
-make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j8 zImage
-make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j20 modules
-make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-  headers_install  INSTALL_HDR_PATH=`pwd`/release/usr 
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j8 zImage && \
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j20 modules && \
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-  headers_install  INSTALL_HDR_PATH=`pwd`/release/usr && \
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j8 modules_install INSTALL_MOD_PATH=`pwd`/release/
 }
 
