@@ -36,6 +36,7 @@ static char tc358743_irq_name[] = "tc358743_irq";
 //static struct tc358743_irq_private *alarmlist=NULL;
 static DEFINE_SPINLOCK(alarm_lock);
 //static DEFINE_SPINLOCK(gpio_lock);
+static struct file *g_filp=NULL;
 
 static DEFINE_MUTEX(tc358743_irq_mutex);
 
@@ -158,7 +159,7 @@ static ssize_t tc358743_irq_read(struct file *file, char __user *buf,
 	ssize_t retval;
 	struct tc358743_irq_private *devp;
 	s32 event_count;
-	//printk(KERN_DEBUG "tc358743_irq_read: before read: \n");
+	printk(KERN_DEBUG "tc358743_irq_read: before read: \n");
 	devp = file->private_data;
 
 	if (len != sizeof(s32))
@@ -220,6 +221,7 @@ static int tc358743_irq_open(struct inode *inode, struct file *filp)
 	struct sensor_data *sensor = &td->sensor;
 
 	struct tc358743_irq_private *priv;
+	printk(KERN_DEBUG "tc358743_irq_open: before malloc: \n");
 
 	priv = kmalloc(sizeof(struct tc358743_irq_private), GFP_KERNEL);
 	if (!priv)
@@ -243,12 +245,14 @@ static int tc358743_irq_open(struct inode *inode, struct file *filp)
 	priv->sensor = sensor;
 
 	/* link it into our alarmlist */
-	//spin_lock_irq(&alarm_lock);
+	spin_lock_irq(&alarm_lock);
 	//priv->next = alarmlist;
 	//alarmlist = priv;
-	//spin_unlock_irq(&alarm_lock);
+	g_filp=filp;
+	spin_unlock_irq(&alarm_lock);
 
 	mutex_unlock(&tc358743_irq_mutex);
+	printk(KERN_DEBUG "tc358743_irq_open: after malloc: for filep=0x%p \n",(void *)filp);
 	return 0;
 }
 
@@ -264,7 +268,6 @@ tc358743_irq_release(struct inode *inode, struct file *filp)
 
 	/* unlink from alarmlist and free the private structure */
 
-	spin_lock_irq(&alarm_lock);
 	//p = alarmlist;
 	todel = (struct tc358743_irq_private *)filp->private_data;
 
@@ -292,10 +295,18 @@ tc358743_irq_release(struct inode *inode, struct file *filp)
 		td->tc_irq_priv=NULL;
 	}
 */
-	td->tc_irq_priv=NULL;
-	kfree(todel);
-
+	spin_lock_irq(&alarm_lock);
+	if (g_filp==filp)
+	{
+		td->tc_irq_priv=NULL;
+		printk(KERN_DEBUG "tc358743_irq_release: td->tc_irq_priv=NULL; for filep=0x%p \n",(void *)filp);
+	}
+	else
+	{
+		printk(KERN_DEBUG "tc358743_irq_release: different filep ptr g_filep=0x%p; for filep=0x%p \n",g_filp,(void *)filp);
+	}
 	spin_unlock_irq(&alarm_lock);
+	kfree(todel);
 
 	return ret;
 }
