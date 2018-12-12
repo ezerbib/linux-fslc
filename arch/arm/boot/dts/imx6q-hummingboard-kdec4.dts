@@ -1021,7 +1021,7 @@
 				status = "disabled";
 			};
 
-			/*usdhc1: usdhc@02190000 {
+			usdhc1: usdhc@02190000 {
 				compatible = "fsl,imx6q-usdhc";
 				reg = <0x02190000 0x4000>;
 				interrupts = <0 22 IRQ_TYPE_LEVEL_HIGH>;
@@ -1031,7 +1031,7 @@
 				clock-names = "ipg", "ahb", "per";
 				bus-width = <4>;
 				status = "disabled";
-			};*/
+			};
 
 			usdhc2: usdhc@02194000 {
 				compatible = "fsl,imx6q-usdhc";
@@ -1503,6 +1503,9 @@
 		      "ldb_di0_div_sel", "ldb_di1_div_sel";
 };
 
+// Wifi chip on new 1.5 SOM
+
+
 //#include "imx6qdl-hummingboard.dtsi"
 /*
  * Copyright (C) 2013,2014 Russell King
@@ -1593,33 +1596,32 @@
 		compatible = "gpio-gate-clock";
 		#clock-cells = <0>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_microsom_brcm_osc>;
+		pinctrl-0 = <&pinctrl_microsom_tiwl_osc>;
 		enable-gpios = <&gpio5 5 GPIO_ACTIVE_HIGH>;
 	};
 
 	regulators {
 		compatible = "simple-bus";
 
-		reg_brcm_osc: brcm-osc-reg {
+	    reg_tiwl_osc: tiwl-osc-reg {
 			compatible = "regulator-fixed";
 			enable-active-high;
 			gpio = <&gpio5 5 0>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&pinctrl_microsom_brcm_osc>;
-			regulator-name = "brcm_osc_reg";
+			pinctrl-0 = <&pinctrl_microsom_tiwl_osc>;
+			regulator-name = "tiwl_osc_reg";
 			regulator-min-microvolt = <3300000>;
 			regulator-max-microvolt = <3300000>;
 			regulator-always-on;
 			regulator-boot-on;
 		};
-
-		reg_brcm: brcm-reg {
+		reg_tiwl: tiwl-reg {
 			compatible = "regulator-fixed";
 			enable-active-high;
 			gpio = <&gpio3 19 0>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&pinctrl_microsom_brcm_reg>;
-			regulator-name = "brcm_reg";
+			pinctrl-0 = <&pinctrl_microsom_tiwl_reg>;
+			regulator-name = "tiwl_reg";
 			regulator-min-microvolt = <3300000>;
 			regulator-max-microvolt = <3300000>;
 			startup-delay-us = <200000>;
@@ -1633,36 +1635,48 @@
 		clocks = <&clk_sdio>;
 		clock-names = "ext_clock";
 	};
+	
+	kim {
+		compatible = "kim";
+		nshutdown_gpio = <160>;  /* GPIO3_IO16 */
+		dev_name = "/dev/ttymxc3";
+		flow_cntrl = <1>;
+		baud_rate = <3000000>;
+		status = "okay";
+	};
+ 
+ 
+	btwilink {
+		compatible = "btwilink";
+		status = "okay";
+	};
 };
 
 &iomuxc {
 	microsom {
-		pinctrl_microsom_brcm_bt: microsom-brcm-bt {
+	    pinctrl_microsom_tiwl_bt: microsom-tiwl-bt {
 			fsl,pins = <
 				MX6QDL_PAD_CSI0_DAT14__GPIO6_IO00	0x40013070
 				MX6QDL_PAD_CSI0_DAT15__GPIO6_IO01	0x40013070
-				MX6QDL_PAD_CSI0_DAT18__GPIO6_IO04	0x40013070
 			>;
 		};
-
-		pinctrl_microsom_brcm_osc: microsom-brcm-osc {
+		pinctrl_microsom_tiwl_osc: microsom-tiwl-osc {
 			fsl,pins = <
 				MX6QDL_PAD_DISP0_DAT11__GPIO5_IO05	0x40013070
 			>;
 		};
-
-		pinctrl_microsom_brcm_reg: microsom-brcm-reg {
+		pinctrl_microsom_tiwl_reg: microsom-tiwl-reg {
 			fsl,pins = <
 				MX6QDL_PAD_EIM_D19__GPIO3_IO19		0x40013070
 			>;
 		};
-
-		pinctrl_microsom_brcm_wifi: microsom-brcm-wifi {
+		pinctrl_microsom_tiwl_wifi: microsom-tiwl-wifi {
 			fsl,pins = <
 				MX6QDL_PAD_GPIO_8__XTALOSC_REF_CLK_32K	0x1b0b0
 				MX6QDL_PAD_CSI0_DATA_EN__GPIO5_IO20	0x40013070
 				MX6QDL_PAD_CSI0_DAT8__GPIO5_IO26	0x40013070
 				MX6QDL_PAD_CSI0_DAT9__GPIO5_IO27	0x40013070
+				MX6QDL_PAD_CSI0_DAT18__GPIO6_IO04	0x40013070
 			>;
 		};
 
@@ -1714,15 +1728,36 @@
     status = "okay";
 };
 
-/* UART4 - Connected to optional BRCM Wifi/BT/FM */
 &uart4 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_microsom_brcm_bt &pinctrl_microsom_uart4>;
+	pinctrl-0 = <&pinctrl_microsom_uart4>;
 	fsl,uart-has-rtscts;
 	status = "okay";
 };
 
 /* USDHC1 - Connected to optional BRCM Wifi/BT/FM */
+
+&usdhc1 {
+	card-external-vcc-supply = <&reg_tiwl>;
+	card-reset-gpios = <&gpio5 26 GPIO_ACTIVE_LOW>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_microsom_tiwl_wifi &pinctrl_microsom_usdhc1>;
+	bus-width = <4>;
+	keep-power-in-suspend;
+	non-removable;
+	no-1-8-v;
+	vmmc-supply = <&reg_tiwl>;
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	wlcore: wlcore@0 {
+		compatible = "ti,wl1837";
+		reg = <2>;
+		interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-parent = <&gpio6>;
+		platform-quirks = <0x1>;
+	};
+};
 /*
 &usdhc1 {
 	card-external-vcc-supply = <&reg_brcm>;
@@ -1947,6 +1982,20 @@
 	status = "okay";
 };
 
+&ecspi2 {
+	fsl,spi-num-chipselects = <1>;
+	cs-gpios = <&gpio2 26 0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hummingboard_ecspi2>;
+	status = "okay";
+
+	spidev0: spi@0 {
+		compatible = "spidev";
+		reg = <0>;
+		spi-max-frequency = <20000000>;
+	};
+};
+
 &flexcan1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_hummingboard_flexcan1>;
@@ -2120,12 +2169,12 @@
 			>;
 		};
 
-        pinctrl_hummingboard_i2c3: hummingboard-i2c3 {
-             fsl,pins = <
+		pinctrl_hummingboard_i2c3: hummingboard-i2c3 {
+			fsl,pins = <
 				MX6QDL_PAD_EIM_D17__I2C3_SCL 0x4001b8b1
 				MX6QDL_PAD_EIM_D18__I2C3_SDA 0x4001b8b1
-             >;
-        };
+			>;
+		};
 
 		pinctrl_hummingboard_mipi: hummingboard_mipi {
 			fsl,pins = <
@@ -2143,12 +2192,7 @@
 		pinctrl_hummingboard_pwm1: pwm1grp {
 			fsl,pins = <MX6QDL_PAD_DISP0_DAT8__PWM1_OUT 0x1b0b1>;
 		};
-		
-		/*
-		pinctrl_hummingboard_sgtl5000_enable: hummingboard-sgtl5000-led {
-			fsl,pins = <MX6QDL_PAD_EIM_DA2__GPIO3_IO02 0x400130b1>;
-		};*/
-		
+
 		pinctrl_hummingboard_sgtl5000: hummingboard-sgtl5000 {
 			fsl,pins = <
 				MX6QDL_PAD_DISP0_DAT19__AUD5_RXD 0x130b0
@@ -2185,6 +2229,15 @@
 
 		pinctrl_hummingboard_spdif: hummingboard-spdif {
 			fsl,pins = <MX6QDL_PAD_GPIO_17__SPDIF_OUT 0x13091>;
+		};
+
+		pinctrl_hummingboard_ecspi2: hummingboard_ecspi2 {
+			fsl,pins = <
+				MX6QDL_PAD_EIM_OE__ECSPI2_MISO   0x100b1
+				MX6QDL_PAD_EIM_CS1__ECSPI2_MOSI  0x100b1
+				MX6QDL_PAD_EIM_CS0__ECSPI2_SCLK  0x100b1
+				MX6QDL_PAD_EIM_RW__GPIO2_IO26    0x000b1 /* CS */
+			>;
 		};
 
 		pinctrl_hummingboard_usbh1_vbus: hummingboard-usbh1-vbus {
